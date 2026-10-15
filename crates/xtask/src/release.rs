@@ -779,7 +779,7 @@ mod tests {
         repo.git("work", &["config", "user.name", "Test"]);
         repo.git("work", &["config", "user.email", "test@example.com"]);
         repo.git("work", &["config", "core.autocrlf", "false"]);
-        repo.git(".", &["init", "-q", "--bare", "public.git"]);
+        repo.git(".", &["init", "-q", "--bare", "-b", "main", "public.git"]);
         repo.write(
             "Cargo.toml",
             "[workspace]\nmembers = [\"crates/a\"]\nresolver = \"3\"\n\n[workspace.package]\nversion = \
@@ -861,7 +861,7 @@ mod tests {
         );
 
         // A change made on the public repo stops the next release.
-        repo.git(".", &["clone", "-q", public.to_str().unwrap(), "elsewhere"]);
+        repo.git(".", &["clone", "-q", "-b", "main", public.to_str().unwrap(), "elsewhere"]);
         repo.git("elsewhere", &["config", "user.name", "Test"]);
         repo.git("elsewhere", &["config", "user.email", "test@example.com"]);
         std::fs::write(repo.dir.join("elsewhere/README.md"), "# A, changed there\n").unwrap();
