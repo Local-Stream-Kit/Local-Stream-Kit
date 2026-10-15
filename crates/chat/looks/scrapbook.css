@@ -1,0 +1,159 @@
+/* Scrapbook: each message a slightly tilted paper note, its name on a
+   coloured tag that slides in after it. On the panel's Plugins → Chat
+   display, typing in it (✎) makes a copy of your own, saved in
+   plugin_data/chat/look/ next to lsk.json, which any editor can change
+   too. */
+
+@import url("https://fonts.googleapis.com/css2?family=Patrick+Hand&family=Permanent+Marker&display=swap");
+
+/* The whole chat: newest at the bottom, on the left. */
+.chat {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: flex-start;
+  gap: 18px;
+  padding: 24px;
+  box-sizing: border-box;
+  font-family: "Patrick Hand", "Comic Sans MS", cursive;
+  font-size: 26px;
+  color: #2b2b2b;
+}
+
+.msg {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  max-width: 100%;
+  animation: msg-in 350ms ease-out both;
+}
+.msg.msg--restored,
+.msg.msg--restored .msg__head {
+  animation: none;
+}
+.msg.msg--leaving {
+  animation: msg-out 400ms ease-in both;
+}
+
+/* The name tag, on top of the note, sliding in a moment later. */
+.msg__head {
+  order: -1;
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin: 0 0 -12px 16px;
+  padding: 2px 14px;
+  background: var(--name-color, #ff8fb8);
+  color: #ffffff;
+  font-family: "Permanent Marker", cursive;
+  font-size: 0.7em;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+  box-shadow: 1px 2px 0 rgba(0, 0, 0, 0.25);
+  transform: rotate(-3deg);
+  animation: tag-in 450ms 150ms cubic-bezier(0.2, 1.4, 0.4, 1) both;
+}
+.badge {
+  height: 1.1em;
+}
+
+/* The note: lined paper with a strip of tape. */
+.msg__body {
+  position: relative;
+  padding: 16px 20px 10px;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+  background-color: #fffdf4;
+  background-image: repeating-linear-gradient(transparent 0 33px, rgba(80, 140, 220, 0.2) 33px 34px);
+  box-shadow: 2px 3px 0 rgba(0, 0, 0, 0.25);
+  transform: rotate(0.6deg);
+}
+.msg:nth-child(even) .msg__body {
+  transform: rotate(-0.8deg);
+}
+.msg__body::before {
+  content: "";
+  position: absolute;
+  top: -9px;
+  right: 18px;
+  width: 64px;
+  height: 18px;
+  background: rgba(255, 236, 160, 0.75);
+  transform: rotate(4deg);
+}
+.msg__body .emote__image {
+  height: 1.5em;
+}
+
+/* Emotes on their own: stickers, no paper. */
+.msg--single-emote .msg__body,
+.msg--emotes-only .msg__body {
+  padding: 14px 6px 0;
+  background: none;
+  box-shadow: none;
+  filter: drop-shadow(2px 3px 0 rgba(0, 0, 0, 0.3));
+}
+.msg--single-emote .msg__body::before,
+.msg--emotes-only .msg__body::before {
+  display: none;
+}
+.msg--single-emote .msg__body .emote__image {
+  height: 3.5em;
+}
+.msg--emotes-only .msg__body .emote__image {
+  height: 2.4em;
+}
+
+/* What a reply answers, scribbled above. */
+.msg__reply {
+  margin: 16px 0 2px 20px;
+  font-size: 0.7em;
+  color: #ffffff;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 90%;
+}
+.msg__reply-name::before {
+  content: "↪ @";
+}
+
+.msg--action .msg__body {
+  font-style: italic;
+  color: var(--name-color, #2b2b2b);
+}
+.msg--highlighted .msg__body {
+  background-color: #fff1a8;
+}
+.msg--first .msg__body {
+  outline: 3px dashed #4ade80;
+  outline-offset: 3px;
+}
+
+/* Lines from a card's Show in chat node (subs, raids, …): a yellow note. */
+.msg--card .msg__body {
+  background-color: #ffe873;
+  font-family: "Permanent Marker", cursive;
+  font-size: 0.9em;
+}
+
+@keyframes msg-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+}
+@keyframes tag-in {
+  from {
+    opacity: 0;
+    transform: translateX(-40px) rotate(-14deg);
+  }
+}
+@keyframes msg-out {
+  to {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+}

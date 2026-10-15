@@ -1,0 +1,18 @@
+[package]
+name = "xtask"
+description = "Build tasks for Local Stream Kit, run through the cargo aliases in .cargo/config.toml"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license-file.workspace = true
+
+[dependencies]
+# The release signing key (`cargo keygen`) and the signed feed (`cargo
+# feed`): the same ed25519, base64 and feed type the app checks updates
+# with.
+base64 = "0.22"
+ring = "0.17.14"
+protocol.workspace = true
+serde_json.workspace = true
+# `cargo release`'s version, compared as the app compares them.
+semver = "1.0.28"

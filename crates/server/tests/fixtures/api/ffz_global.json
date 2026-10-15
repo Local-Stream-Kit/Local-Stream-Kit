@@ -1,0 +1,279 @@
+{
+  "default_sets": [
+    3,
+    1539687
+  ],
+  "sets": {
+    "3": {
+      "id": 3,
+      "_type": 1,
+      "icon": null,
+      "title": "Global Emotes",
+      "css": null,
+      "emoticons": [
+        {
+          "id": 9,
+          "name": "ZrehplaR",
+          "height": 30,
+          "width": 33,
+          "public": false,
+          "hidden": true,
+          "modifier": false,
+          "modifier_flags": 0,
+          "offset": null,
+          "margins": null,
+          "css": null,
+          "owner": {
+            "_id": 2,
+            "name": "dansalvato",
+            "display_name": "dansalvato"
+          },
+          "artist": null,
+          "urls": {
+            "1": "https://cdn.frankerfacez.com/emote/9/1",
+            "2": "https://cdn.frankerfacez.com/emote/9/2",
+            "4": "https://cdn.frankerfacez.com/emote/9/4"
+          },
+          "status": 1,
+          "usage_count": 1,
+          "created_at": "2015-02-07T05:33:23.123Z",
+          "last_updated": "2015-05-30T18:32:47.401Z"
+        },
+        {
+          "id": 6,
+          "name": "YooHoo",
+          "height": 34,
+          "width": 28,
+          "public": false,
+          "hidden": false,
+          "modifier": false,
+          "modifier_flags": 0,
+          "offset": null,
+          "margins": null,
+          "css": null,
+          "owner": {
+            "_id": 2,
+            "name": "dansalvato",
+            "display_name": "dansalvato"
+          },
+          "artist": null,
+          "urls": {
+            "1": "https://cdn.frankerfacez.com/emote/6/1",
+            "2": "https://cdn.frankerfacez.com/emote/6/2",
+            "4": "https://cdn.frankerfacez.com/emote/6/4"
+          },
+          "status": 1,
+          "usage_count": 1,
+          "created_at": "2015-04-02T10:24:46.923Z",
+          "last_updated": "2015-04-02T10:24:46.923Z"
+        },
+        {
+          "id": 4,
+          "name": "ManChicken",
+          "height": 29,
+          "width": 30,
+          "public": false,
+          "hidden": false,
+          "modifier": false,
+          "modifier_flags": 0,
+          "offset": null,
+          "margins": null,
+          "css": null,
+          "owner": {
+            "_id": 2,
+            "name": "dansalvato",
+            "display_name": "dansalvato"
+          },
+          "artist": null,
+          "urls": {
+            "1": "https://cdn.frankerfacez.com/emote/4/1",
+            "2": "https://cdn.frankerfacez.com/emote/4/2",
+            "4": "https://cdn.frankerfacez.com/emote/4/4"
+          },
+          "status": 1,
+          "usage_count": 1,
+          "created_at": "2015-04-02T10:24:46.530Z",
+          "last_updated": "2015-04-02T10:24:46.530Z"
+        },
+        {
+          "id": 3,
+          "name": "BeanieHipster",
+          "height": 33,
+          "width": 28,
+          "public": false,
+          "hidden": false,
+          "modifier": false,
+          "modifier_flags": 0,
+          "offset": null,
+          "margins": null,
+          "css": null,
+          "owner": {
+            "_id": 2,
+            "name": "dansalvato",
+            "display_name": "dansalvato"
+          },
+          "artist": null,
+          "urls": {
+            "1": "https://cdn.frankerfacez.com/emote/3/1",
+            "2": "https://cdn.frankerfacez.com/emote/3/2",
+            "4": "https://cdn.frankerfacez.com/emote/3/4"
+          },
+          "status": 1,
+          "usage_count": 2,
+          "created_at": "2015-04-02T10:24:46.008Z",
+          "last_updated": "2015-04-02T10:24:46.008Z"
+        },
+        {
+          "id": 25927,
+          "name": "CatBag",
+          "height": 29,
+          "width": 32,
+          "public": false,
+          "hidden": false,
+          "modifier": false,
+          "modifier_flags": 0,
+          "offset": null,
+          "margins": null,
+          "css": null,
+          "owner": {
+            "_id": 3,
+            "name": "wolsk",
+            "display_name": "Wolsk"
+          },
+          "artist": null,
+          "urls": {
+            "1": "https://cdn.frankerfacez.com/emote/25927/1",
+            "2": "https://cdn.frankerfacez.com/emote/25927/2",
+            "4": "https://cdn.frankerfacez.com/emote/25927/4"
+          },
+          "status": 1,
+          "usage_count": 3,
+          "created_at": "2015-05-31T01:11:55.508Z",
+          "last_updated": "2015-05-31T01:12:56.720Z"
+        }
+      ]
+    },
+    "1539687": {
+      "id": 1539687,
+      "_type": 2,
+      "icon": null,
+      "title": "Emote Effects",
+      "css": null,
+      "emoticons": [
+        {
+          "id": 723890,
+          "name": "ffzW",
+          "height": 32,
+          "width": 32,
+          "public": false,
+          "hidden": false,
+          "modifier": true,
+          "modifier_flags": 9,
+          "offset": null,
+          "margins": null,
+          "css": null,
+          "owner": {
+            "_id": 1,
+            "name": "sirstendec",
+            "display_name": "SirStendec"
+          },
+          "artist": null,
+          "urls": {
+            "1": "https://cdn.frankerfacez.com/emote/723890/1",
+            "2": "https://cdn.frankerfacez.com/emote/723890/2",
+            "4": "https://cdn.frankerfacez.com/emote/723890/4"
+          },
+          "status": 1,
+          "usage_count": 1,
+          "created_at": "2023-03-27T22:17:16.460Z",
+          "last_updated": "2023-03-27T22:17:16.460Z"
+        },
+        {
+          "id": 720508,
+          "name": "ffzX",
+          "height": 32,
+          "width": 32,
+          "public": false,
+          "hidden": false,
+          "modifier": true,
+          "modifier_flags": 3,
+          "offset": null,
+          "margins": null,
+          "css": null,
+          "owner": {
+            "_id": 1,
+            "name": "sirstendec",
+            "display_name": "SirStendec"
+          },
+          "artist": null,
+          "urls": {
+            "1": "https://cdn.frankerfacez.com/emote/720508/1",
+            "2": "https://cdn.frankerfacez.com/emote/720508/2",
+            "4": "https://cdn.frankerfacez.com/emote/720508/4"
+          },
+          "status": 1,
+          "usage_count": 1,
+          "created_at": "2023-03-04T20:17:47.845Z",
+          "last_updated": "2023-03-04T20:17:47.845Z"
+        },
+        {
+          "id": 720509,
+          "name": "ffzY",
+          "height": 32,
+          "width": 32,
+          "public": false,
+          "hidden": false,
+          "modifier": true,
+          "modifier_flags": 5,
+          "offset": null,
+          "margins": null,
+          "css": null,
+          "owner": {
+            "_id": 1,
+            "name": "sirstendec",
+            "display_name": "SirStendec"
+          },
+          "artist": null,
+          "urls": {
+            "1": "https://cdn.frankerfacez.com/emote/720509/1",
+            "2": "https://cdn.frankerfacez.com/emote/720509/2",
+            "4": "https://cdn.frankerfacez.com/emote/720509/4"
+          },
+          "status": 1,
+          "usage_count": 1,
+          "created_at": "2023-03-04T20:17:47.853Z",
+          "last_updated": "2023-03-04T20:17:47.853Z"
+        },
+        {
+          "id": 720729,
+          "name": "ffzCursed",
+          "height": 32,
+          "width": 32,
+          "public": false,
+          "hidden": false,
+          "modifier": true,
+          "modifier_flags": 16385,
+          "offset": null,
+          "margins": null,
+          "css": null,
+          "owner": {
+            "_id": 1,
+            "name": "sirstendec",
+            "display_name": "SirStendec"
+          },
+          "artist": null,
+          "urls": {
+            "1": "https://cdn.frankerfacez.com/emote/720729/1",
+            "2": "https://cdn.frankerfacez.com/emote/720729/2",
+            "4": "https://cdn.frankerfacez.com/emote/720729/4"
+          },
+          "status": 1,
+          "usage_count": 1,
+          "created_at": "2023-03-05T06:35:25.882Z",
+          "last_updated": "2023-03-05T06:35:25.882Z"
+        }
+      ]
+    }
+  },
+  "users": {}
+}

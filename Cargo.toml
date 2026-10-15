@@ -1,0 +1,28 @@
+[workspace]
+members = ["crates/protocol", "crates/server", "crates/overlay", "crates/panel", "crates/rain", "crates/alert", "crates/chat", "crates/obs", "crates/xtask", "crates/e2e"]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+publish = false
+license-file = "LICENSE.md"
+
+# Backtraces keep file and line, without full debug info: smaller objects,
+# faster links (an lsk rebuild 12.5 → 9.2 s), but a debugger shows no
+# local variables. Comment it out for a debugging session.
+[profile.dev]
+debug = "line-tables-only"
+
+[workspace.dependencies]
+protocol = { path = "crates/protocol" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# twitch_api's hype train v2 types (PR #536) are merged but not released
+# yet. Its twitch_oauth2 and twitch_types are submodules of the same
+# repository, so all three come from there, or we'd have two copies of each.
+[patch.crates-io]
+twitch_api = { git = "https://github.com/twitch-rs/twitch_api", rev = "62e4c626644496bd619f7b58565e5d1cd8e243aa" }
+twitch_oauth2 = { git = "https://github.com/twitch-rs/twitch_api", rev = "62e4c626644496bd619f7b58565e5d1cd8e243aa" }
+twitch_types = { git = "https://github.com/twitch-rs/twitch_api", rev = "62e4c626644496bd619f7b58565e5d1cd8e243aa" }

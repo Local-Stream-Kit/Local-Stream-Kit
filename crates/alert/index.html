@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Alerts</title>
+  <script>
+    // The overlay sends the plugin's settings as soon as this page has
+    // loaded, before its WebAssembly has started: messages wait here until
+    // it has (lib.rs takes them).
+    window.alertWaiting = [];
+    window.alertEarly = (event) => window.alertWaiting.push(event);
+    addEventListener("message", window.alertEarly);
+  </script>
+  <!-- Release builds run wasm-opt at level 2 (speed), as the overlay does. -->
+  <link data-trunk rel="rust" data-wasm-opt="2" />
+  <!-- No integrity check: in its sandbox the page's origin is opaque, so
+       the stylesheet is a cross-origin (no-cors) request, which a check
+       would block. -->
+  <link data-trunk rel="css" href="alert.css" data-integrity="none" />
+  <style>
+    /* Transparent, so only the alert composites into OBS. */
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: transparent;
+    }
+    #alerts {
+      position: fixed;
+      inset: 0;
+      overflow: hidden;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="alerts"></div>
+</body>
+</html>

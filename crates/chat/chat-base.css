@@ -1,0 +1,30 @@
+/* The chat display's structure, under its look (the streamer's CSS,
+   which can override any of it). */
+
+.chat {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+/* An emote, with zero-width emotes stacked on it, centred. */
+.chat .emote {
+  position: relative;
+  display: inline-block;
+  vertical-align: middle;
+}
+.chat .emote__image {
+  display: block;
+}
+.chat .emote__overlay {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  height: 100%;
+  transform: translate(-50%, -50%);
+}
+
+/* A badge whose image isn't known (no Twitch login) takes no room. */
+.chat span.badge {
+  display: none;
+}

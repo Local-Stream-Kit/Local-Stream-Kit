@@ -1,0 +1,78 @@
+/* Minimal: no box, just the words with a shadow over a thin white line
+   that fills up, for a stream that wants it out of the way. On the
+   panel's Plugins → Hype train bar, typing in it (✎) makes a copy of
+   your own, saved in plugin_data/hype-train/look/ next to lsk.json,
+   which any editor can change too. The parts and classes are under its
+   Help (?) there. */
+
+/* The quick changes: its width and the line's colour. */
+.train {
+  --width: 520px;
+  --bar: #ffffff;
+}
+
+/* Special trains get their own colour. */
+.train.golden_kappa { --bar: #ffd34d; }
+.train.treasure { --bar: #4dffc3; }
+
+.train {
+  width: var(--width);
+  color: #ffffff;
+  font: 700 20px/1.2 "Segoe UI", system-ui, sans-serif;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
+}
+
+.head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.title {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.level {
+  flex: 1;
+  color: var(--bar);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.time {
+  font-size: 17px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.85;
+}
+
+.track {
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.25);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+.fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--bar);
+  transition: width 0.6s ease;
+}
+/* The line is too thin for numbers. */
+.points { display: none; }
+
+/* In and out: a fade. */
+.train {
+  opacity: 0;
+  transition: opacity 0.6s ease;
+}
+.train.shown { opacity: 1; }
+
+/* A new level: the level grows for a moment. */
+.train.level-up .level { animation: grow 0.9s ease-out; }
+@keyframes grow {
+  30% { transform: scale(1.25); }
+}
+.level { display: inline-block; transform-origin: left center; }

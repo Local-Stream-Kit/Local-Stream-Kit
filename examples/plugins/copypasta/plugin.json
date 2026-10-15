@@ -1,0 +1,28 @@
+{
+  "id": "copypasta",
+  "name": "Copypasta",
+  "version": "0.1.0",
+  "api": 1,
+  "author": "Local Stream Kit",
+  "description": "Fires when chat copies a message: the same message from several viewers within a short time.",
+  "hears": ["chat"],
+  "nodes": [
+    {
+      "id": "copypasta",
+      "title": "Copypasta",
+      "category": "events",
+      "outputs": [
+        { "name": "event", "label": "Event", "type": "event" },
+        { "name": "message", "label": "Message", "type": "text" },
+        { "name": "viewers", "label": "Viewers", "type": "number" },
+        { "name": "count", "label": "Count", "type": "number" },
+        { "name": "summary", "label": "Summary", "type": "text" }
+      ],
+      "settings": [
+        { "key": "viewers", "label": "Viewers", "type": "number", "default": 3, "min": 2 },
+        { "key": "within", "label": "Within (seconds)", "type": "number", "default": 30, "min": 1 },
+        { "key": "shortest", "label": "Shortest message (characters)", "type": "number", "default": 10, "min": 1 }
+      ]
+    }
+  ]
+}

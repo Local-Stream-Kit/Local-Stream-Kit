@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Hype train bar</title>
+  <style>
+    /* Transparent, so only the bar composites into OBS. */
+    html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: transparent; }
+    /* The whole screen, with the bar placed in it (Position) 40 px from the
+       edges: the room left beside and above it is shared out as Position
+       says (hype-train.js sets --columns and --rows), so it stays on screen
+       and a bigger one grows away from the edges it's against. The rest is
+       the look. */
+    #stage {
+      position: fixed;
+      inset: 0;
+      box-sizing: border-box;
+      padding: 40px;
+      display: grid;
+      grid-template-columns: var(--columns, 0.5fr auto 0.5fr);
+      grid-template-rows: var(--rows, 0fr auto 1fr);
+    }
+    #stage > .train { grid-area: 2 / 2; }
+    /* An emote in the title, with the zero-width ones stacked on it. */
+    .emote { position: relative; display: inline-block; vertical-align: middle; }
+    .emote__image, .emote__overlay { display: block; height: 1.3em; }
+    .emote__overlay { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); }
+  </style>
+  <!-- The look: the plugin's `look` setting's picked CSS, filled in by
+       hype-train.js. -->
+  <style id="look"></style>
+</head>
+<body>
+  <div id="stage">
+    <div class="train" id="train">
+      <div class="head">
+        <span class="title" id="title"></span>
+        <span class="level" id="level"></span>
+        <span class="time" id="time"></span>
+      </div>
+      <div class="track">
+        <div class="fill" id="fill"></div>
+        <span class="points" id="points"></span>
+      </div>
+    </div>
+  </div>
+  <script src="hype-train.js"></script>
+</body>
+</html>

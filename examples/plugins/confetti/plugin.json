@@ -1,0 +1,36 @@
+{
+  "id": "confetti",
+  "name": "Confetti",
+  "version": "0.1.0",
+  "api": 1,
+  "author": "Local Stream Kit",
+  "description": "Bursts of confetti on the overlay. The example plugin: a manifest and an overlay page, no server code.",
+  "nodes": [
+    {
+      "id": "burst",
+      "title": "Confetti",
+      "category": "effects",
+      "inputs": [
+        { "name": "trigger", "label": "Trigger", "type": "event" },
+        { "name": "pieces", "label": "Pieces", "type": "number" }
+      ],
+      "settings": [
+        { "key": "pieces", "label": "Pieces", "type": "number", "default": 150, "min": 1, "max": 1000 },
+        {
+          "key": "from",
+          "label": "From",
+          "type": "choice",
+          "default": "corners",
+          "options": [
+            { "value": "corners", "label": "The bottom corners" },
+            { "value": "top", "label": "The top" },
+            { "value": "middle", "label": "The middle" }
+          ]
+        },
+        { "key": "colour", "label": "Colour", "type": "colour", "default": "#ffcc00" },
+        { "key": "rainbow", "label": "Many colours", "type": "bool", "default": true },
+        { "key": "seconds", "label": "Lasts (s)", "type": "number", "default": 5, "min": 1, "max": 30 }
+      ]
+    }
+  ]
+}

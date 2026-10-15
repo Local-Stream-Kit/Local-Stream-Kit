@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Emote rain</title>
+  <script>
+    // The overlay sends the plugin's settings as soon as this page has
+    // loaded, before its WebAssembly has started: messages wait here until
+    // it has (lib.rs takes them).
+    window.rainWaiting = [];
+    window.rainEarly = (event) => window.rainWaiting.push(event);
+    addEventListener("message", window.rainEarly);
+  </script>
+  <!-- Release builds run wasm-opt at level 2 (speed), as the overlay does. -->
+  <link data-trunk rel="rust" data-wasm-opt="2" />
+  <style>
+    /* Transparent, so only the emotes composite into OBS. */
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: transparent;
+    }
+    #rain {
+      position: fixed;
+      inset: 0;
+      overflow: hidden;
+      pointer-events: none;
+    }
+    #rain canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+    /* The fallback without ImageDecoder: one <img> per emote. */
+    #rain img {
+      position: absolute;
+      left: 0;
+      top: 0;
+      will-change: transform;
+    }
+  </style>
+</head>
+<body>
+  <div id="rain"></div>
+</body>
+</html>

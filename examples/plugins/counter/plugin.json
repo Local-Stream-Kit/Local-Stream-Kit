@@ -1,0 +1,52 @@
+{
+  "id": "counter",
+  "name": "Counter",
+  "version": "0.1.0",
+  "api": 1,
+  "author": "Local Stream Kit",
+  "description": "Counts things (hugs, deaths, …), keeps the counts between streams, and shows a count on the overlay when it changes. Every other lets every second event through.",
+  "nodes": [
+    {
+      "id": "count",
+      "title": "Count",
+      "category": "effects",
+      "inputs": [
+        { "name": "trigger", "label": "Trigger", "type": "event" },
+        { "name": "by", "label": "By", "type": "number" }
+      ],
+      "settings": [
+        { "key": "counter", "label": "Counter", "type": "text", "default": "Hugs" },
+        { "key": "by", "label": "By", "type": "number", "default": 1 },
+        { "key": "reset", "label": "Start again from 0", "type": "bool", "default": false },
+        { "key": "show", "label": "Show it on the overlay", "type": "bool", "default": true }
+      ]
+    },
+    {
+      "id": "counted",
+      "title": "Counted",
+      "category": "events",
+      "outputs": [
+        { "name": "event", "label": "Event", "type": "event" },
+        { "name": "counter", "label": "Counter", "type": "text" },
+        { "name": "count", "label": "Count", "type": "number" },
+        { "name": "summary", "label": "Summary", "type": "text" }
+      ]
+    },
+    {
+      "id": "every_other",
+      "title": "Every other",
+      "category": "flow",
+      "inputs": [
+        { "name": "event", "label": "Event", "type": "event" }
+      ],
+      "outputs": [
+        { "name": "event", "label": "Passes", "type": "event" },
+        { "name": "miss", "label": "Skipped", "type": "event" },
+        { "name": "count", "label": "Count", "type": "number" }
+      ],
+      "settings": [
+        { "key": "counter", "label": "Counter", "type": "text", "default": "Every other" }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+# Store and check out text files with LF line endings, regardless of the
+# local core.autocrlf setting.
+* text=auto eol=lf
+
+# Windows batch files need CRLF to run correctly.
+*.bat text eol=crlf
+*.cmd text eol=crlf

@@ -1,0 +1,19 @@
+[package]
+name = "e2e"
+description = "End-to-end tests: the real server and control panel, driven in headless Edge / Chrome. Run with `cargo e2e`"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license-file.workspace = true
+
+[dependencies]
+protocol.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chromiumoxide = "0.9"
+tokio = { version = "1.53", features = ["full"] }
+futures-util = "0.3"
+base64 = "0.22"
+tokio-tungstenite = "0.29"
+ring = "0.17.14"
+zip = { version = "9.0.0", default-features = false, features = ["deflate"] }

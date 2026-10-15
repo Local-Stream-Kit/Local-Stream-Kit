@@ -1,0 +1,119 @@
+/* Neon: a glowing outline, a bar that runs from cyan to pink with a
+   light sweeping along it, and big square letters. On the
+   panel's Plugins → Hype train bar, typing in it (✎) makes a copy of
+   your own, saved in plugin_data/hype-train/look/ next to lsk.json,
+   which any editor can change too. The parts and classes are under its
+   Help (?) there. */
+
+@import url("https://fonts.googleapis.com/css2?family=Orbitron:wght@600;800&display=swap");
+
+/* The quick changes: its width and the two glowing colours. */
+.train {
+  --width: 720px;
+  --glow: #00e5ff;
+  --glow-2: #ff2bd6;
+}
+
+/* Special trains glow in their own colours. */
+.train.golden_kappa { --glow: #ffd54a; --glow-2: #ff8a00; }
+.train.treasure { --glow: #3dffa8; --glow-2: #00a2ff; }
+
+.train {
+  width: var(--width);
+  box-sizing: border-box;
+  padding: 12px 18px 14px;
+  border: 2px solid var(--glow);
+  border-radius: 6px;
+  background: rgba(8, 4, 20, 0.82);
+  color: #effcff;
+  font: 800 22px/1.2 "Orbitron", "Segoe UI", sans-serif;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-shadow: 0 0 6px var(--glow);
+  box-shadow: 0 0 14px var(--glow), inset 0 0 14px rgba(255, 255, 255, 0.08);
+}
+
+.head {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  margin-bottom: 10px;
+}
+.title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.level {
+  color: var(--glow-2);
+  text-shadow: 0 0 8px var(--glow-2), 0 0 2px var(--glow-2);
+  white-space: nowrap;
+}
+.time {
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.track {
+  position: relative;
+  height: 18px;
+  border: 1px solid var(--glow);
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.05);
+  overflow: hidden;
+}
+.fill {
+  height: 100%;
+  background:
+    linear-gradient(100deg, transparent 30%, rgba(255, 255, 255, 0.6) 50%, transparent 70%) -200% 0 / 50% 100% no-repeat,
+    linear-gradient(90deg, var(--glow), var(--glow-2));
+  box-shadow: 0 0 16px var(--glow-2);
+  transition: width 0.6s ease-out;
+  animation: sweep 2.4s linear infinite;
+}
+@keyframes sweep {
+  to { background-position: 300% 0, 0 0; }
+}
+.points {
+  position: absolute;
+  inset: 0 8px 0 auto;
+  display: flex;
+  align-items: center;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* In and out: it flickers on, like a neon sign. */
+.train {
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+.train.shown {
+  opacity: 1;
+  animation: switch-on 0.6s steps(1, end);
+}
+.train.restored { animation: none; }
+@keyframes switch-on {
+  0% { opacity: 0.2; }
+  15% { opacity: 1; }
+  25% { opacity: 0.3; }
+  40% { opacity: 1; }
+  55% { opacity: 0.6; }
+  70% { opacity: 1; }
+}
+
+/* A new level: the whole sign flares. */
+.train.level-up { animation: flare 1s ease-out; }
+@keyframes flare {
+  0% { box-shadow: 0 0 60px var(--glow-2), inset 0 0 40px var(--glow-2); filter: brightness(1.8); }
+  100% { box-shadow: 0 0 14px var(--glow), inset 0 0 14px rgba(255, 255, 255, 0.08); filter: none; }
+}
+
+/* Ended: the full bar pulses until it goes. */
+.train.ended .fill { animation: pulse 0.8s ease-in-out infinite alternate; }
+@keyframes pulse {
+  to { filter: brightness(1.7); }
+}

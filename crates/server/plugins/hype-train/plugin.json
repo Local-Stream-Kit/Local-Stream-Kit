@@ -1,0 +1,42 @@
+{
+  "id": "hype-train",
+  "name": "Hype train bar",
+  "version": "1.0.0",
+  "api": 1,
+  "author": "Local Stream Kit",
+  "page_hosts": ["fonts.googleapis.com", "fonts.gstatic.com"],
+  "help": "help.html",
+  "preview": {
+    "node": "bar",
+    "values": { "title": "Hype train", "class": "regular", "level": 2, "progress": 640, "goal": 1000, "seconds_left": 185 }
+  },
+  "settings": [
+    { "key": "look", "label": "Look (CSS)", "type": "file", "file": "hype-train.css", "default": "looks/purple.css",
+      "starts": [
+        { "value": "looks/purple.css", "label": "Purple" },
+        { "value": "looks/neon.css", "label": "Neon" },
+        { "value": "looks/minimal.css", "label": "Minimal" }
+      ] },
+    { "key": "position", "label": "Position", "type": "position", "default": "top" },
+    { "key": "linger", "label": "Fade out (s)", "type": "number", "default": 8, "min": 0, "max": 60 }
+  ],
+  "nodes": [
+    {
+      "id": "bar",
+      "title": "Hype train bar",
+      "category": "effects",
+      "inputs": [
+        { "name": "trigger", "label": "Trigger", "type": "event" },
+        { "name": "title", "label": "Title", "type": "text" },
+        { "name": "level", "label": "Level", "type": "number" },
+        { "name": "progress", "label": "Progress", "type": "number" },
+        { "name": "goal", "label": "Goal", "type": "number" },
+        { "name": "seconds_left", "label": "Seconds left", "type": "number" }
+      ],
+      "settings": [
+        { "key": "title", "label": "Title", "type": "text", "default": "{train}" },
+        { "key": "class", "label": "Class", "type": "text", "default": "{kind}", "placeholder": "For the CSS" }
+      ]
+    }
+  ]
+}

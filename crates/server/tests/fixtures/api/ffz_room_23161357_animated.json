@@ -1,0 +1,135 @@
+{
+  "room": {
+    "_id": 135157,
+    "twitch_id": 23161357,
+    "youtube_id": null,
+    "id": "lirik",
+    "is_group": false,
+    "display_name": "LIRIK",
+    "set": 135169,
+    "moderator_badge": "https://cdn.frankerfacez.com/room-badge/mod/id/23161357/v/1ed78e6a/1",
+    "vip_badge": {
+      "1": "https://cdn.frankerfacez.com/room-badge/vip/id/23161357/v/e629b8b0/1",
+      "2": "https://cdn.frankerfacez.com/room-badge/vip/id/23161357/v/e629b8b0/2",
+      "4": "https://cdn.frankerfacez.com/room-badge/vip/id/23161357/v/e629b8b0/4"
+    },
+    "mod_urls": {
+      "1": "https://cdn.frankerfacez.com/room-badge/mod/id/23161357/v/1ed78e6a/1",
+      "2": "https://cdn.frankerfacez.com/room-badge/mod/id/23161357/v/1ed78e6a/2",
+      "4": "https://cdn.frankerfacez.com/room-badge/mod/id/23161357/v/1ed78e6a/4"
+    },
+    "user_badges": {
+      "2": [
+        "fossabot",
+        "analyticsbot"
+      ]
+    },
+    "user_badge_ids": {
+      "2": [
+        237719657,
+        78295871
+      ]
+    },
+    "css": null
+  },
+  "sets": {
+    "135169": {
+      "id": 135169,
+      "_type": 1,
+      "icon": null,
+      "title": "Channel: LIRIK",
+      "css": null,
+      "emoticons": [
+        {
+          "id": 739826,
+          "name": "fallDamage",
+          "height": 32,
+          "width": 32,
+          "public": true,
+          "hidden": false,
+          "modifier": false,
+          "modifier_flags": 0,
+          "offset": null,
+          "margins": null,
+          "css": null,
+          "owner": {
+            "_id": 6049,
+            "name": "serapollyon",
+            "display_name": "SerApollyon"
+          },
+          "artist": null,
+          "urls": {
+            "1": "https://cdn.frankerfacez.com/emote/739826/1",
+            "2": "https://cdn.frankerfacez.com/emote/739826/2",
+            "4": "https://cdn.frankerfacez.com/emote/739826/4"
+          },
+          "animated": {
+            "1": "https://cdn.frankerfacez.com/emote/739826/animated/1",
+            "2": "https://cdn.frankerfacez.com/emote/739826/animated/2",
+            "4": "https://cdn.frankerfacez.com/emote/739826/animated/4"
+          },
+          "status": 1,
+          "usage_count": 8,
+          "created_at": "2023-10-24T01:10:36.466Z",
+          "last_updated": "2023-10-28T20:29:09.929Z"
+        },
+        {
+          "id": 329385,
+          "name": "WideConcern",
+          "height": 20,
+          "width": 80,
+          "public": true,
+          "hidden": false,
+          "modifier": false,
+          "modifier_flags": 0,
+          "offset": null,
+          "margins": null,
+          "css": null,
+          "owner": {
+            "_id": 279375,
+            "name": "camelul",
+            "display_name": "Camelul"
+          },
+          "artist": null,
+          "urls": {
+            "1": "https://cdn.frankerfacez.com/emote/329385/1",
+            "2": "https://cdn.frankerfacez.com/emote/329385/2",
+            "4": "https://cdn.frankerfacez.com/emote/329385/4"
+          },
+          "status": 1,
+          "usage_count": 345,
+          "created_at": "2019-03-03T21:19:09.512Z",
+          "last_updated": "2019-03-15T08:24:56.898Z"
+        },
+        {
+          "id": 681861,
+          "name": "happyFR",
+          "height": 32,
+          "width": 32,
+          "public": false,
+          "hidden": false,
+          "modifier": false,
+          "modifier_flags": 0,
+          "offset": null,
+          "margins": null,
+          "css": null,
+          "owner": {
+            "_id": 832901,
+            "name": "bioxene",
+            "display_name": "Bioxene"
+          },
+          "artist": null,
+          "urls": {
+            "1": "https://cdn.frankerfacez.com/emote/681861/1",
+            "2": "https://cdn.frankerfacez.com/emote/681861/2",
+            "4": "https://cdn.frankerfacez.com/emote/681861/4"
+          },
+          "status": 1,
+          "usage_count": 1,
+          "created_at": "2022-01-08T22:26:17.255Z",
+          "last_updated": "2022-01-09T05:11:39.233Z"
+        }
+      ]
+    }
+  }
+}

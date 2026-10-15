@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>The markup and its classes</title>
+  <style>
+    body { margin: 0; padding: 10px 12px; font: 13px/1.45 system-ui, sans-serif; color: #1d1e24; background: #fff; }
+    h1 { margin: 0 0 6px; font-size: 14px; }
+    p { margin: 6px 0; }
+    pre, code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+    pre { margin: 0; padding: 8px; overflow-x: auto; border-radius: 6px; background: #f1f2f5; }
+    ul { margin: 0; padding-left: 16px; }
+    li { margin: 3px 0; }
+    li span { color: #5c5f6b; }
+  </style>
+</head>
+<body>
+  <h1>The markup and its classes</h1>
+  <p>The look is your CSS: it styles this markup. <code>#stage</code> is the whole screen, and places the bar where the Where setting says, 40 px from the edges.</p>
+  <pre>#stage
+  .train …classes
+    .head
+      .title   the node's Title: text, span.emote &gt; img.emote__image
+                 (+ img.emote__overlay), span.text-style.text-style-&lt;name&gt;
+      .level   "Level 3"
+      .time    "2:41", or "Ended"
+    .track
+      .fill    as wide as the train has got towards the next level
+      .points  "340 / 500" (empty once it has ended)</pre>
+  <p>Classes on <code>.train</code>, each when it applies:</p>
+  <ul>
+    <li><code>.shown</code> <span>while it's up; without it, it's on its way out (or gone), so the look's own transition or animation takes it away</span></li>
+    <li><code>.level-up</code> <span>for 2.5 s after a new level, for an animation (added again at each one)</span></li>
+    <li><code>.ended</code> <span>once the train has ended, until it goes ("Fade out")</span></li>
+    <li><code>.restored</code> <span>shown again after the Browser Source reloaded, so CSS can skip its entrance</span></li>
+    <li><code>.at-top .at-middle .at-bottom</code> <span>the edge it's nearest, from Position, to slide in from that side</span></li>
+    <li><code>.regular .golden_kappa .treasure</code> <span>the kind of train: the node's Class, <code>{kind}</code> unless you change it (any classes you type there come too)</span></li>
+  </ul>
+  <p><code>var(--progress)</code> on <code>.train</code> is how far it has got, from 0 to 1 (1 once it has ended), for a look that draws it some other way than <code>.fill</code>'s width.</p>
+  <p>Fonts can come from Google Fonts (<code>@import url("https://fonts.googleapis.com/css2?…")</code>).</p>
+</body>
+</html>

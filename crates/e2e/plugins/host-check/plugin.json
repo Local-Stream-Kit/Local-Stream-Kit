@@ -1,0 +1,156 @@
+{
+  "id": "host-check",
+  "name": "Host check",
+  "version": "0.1.0",
+  "api": 1,
+  "description": "For the e2e tests: tries each thing the app offers server code, and reports back with its Result event.",
+  "icon": "icon.svg",
+  "hosts": [
+    "127.0.0.1"
+  ],
+  "voices": [
+    { "id": "beep", "name": "Beep" },
+    { "id": "broken", "name": "Broken" }
+  ],
+  "nodes": [
+    {
+      "id": "check",
+      "title": "Check",
+      "category": "effects",
+      "inputs": [
+        {
+          "name": "trigger",
+          "label": "Trigger",
+          "type": "event"
+        },
+        {
+          "name": "what",
+          "label": "What",
+          "type": "text"
+        },
+        {
+          "name": "url",
+          "label": "URL",
+          "type": "text"
+        }
+      ],
+      "settings": [
+        {
+          "key": "what",
+          "label": "What",
+          "type": "text",
+          "default": "{what}"
+        },
+        {
+          "key": "url",
+          "label": "URL",
+          "type": "text",
+          "default": "{url}"
+        }
+      ]
+    },
+    {
+      "id": "relay",
+      "title": "Relay",
+      "category": "effects",
+      "inputs": [
+        {
+          "name": "trigger",
+          "label": "Trigger",
+          "type": "event"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "done",
+          "label": "Done",
+          "type": "event"
+        }
+      ]
+    },
+    {
+      "id": "hold",
+      "title": "Hold",
+      "category": "effects",
+      "queue": "always",
+      "inputs": [
+        {
+          "name": "trigger",
+          "label": "Trigger",
+          "type": "event"
+        }
+      ],
+      "settings": [
+        {
+          "key": "until",
+          "label": "Until",
+          "type": "text",
+          "default": "done"
+        }
+      ]
+    },
+    {
+      "id": "result",
+      "title": "Result",
+      "category": "events",
+      "outputs": [
+        {
+          "name": "event",
+          "label": "Event",
+          "type": "event"
+        },
+        {
+          "name": "again",
+          "label": "Again",
+          "type": "event"
+        },
+        {
+          "name": "what",
+          "label": "What",
+          "type": "text"
+        },
+        {
+          "name": "result",
+          "label": "Result",
+          "type": "text"
+        }
+      ]
+    },
+    {
+      "id": "later",
+      "title": "Later",
+      "category": "flow",
+      "inputs": [
+        { "name": "event", "label": "Event", "type": "event" }
+      ],
+      "outputs": [
+        { "name": "event", "label": "Event", "type": "event" },
+        { "name": "who", "label": "Who", "type": "text" }
+      ]
+    }
+  ],
+  "settings": [
+    {
+      "key": "greeting",
+      "label": "Greeting",
+      "type": "text",
+      "default": "hi"
+    },
+    {
+      "key": "chime",
+      "label": "Chime",
+      "type": "sound"
+    },
+    {
+      "key": "token",
+      "label": "Token",
+      "type": "secret"
+    },
+    {
+      "key": "pick",
+      "label": "Pick",
+      "type": "text",
+      "suggest_from": "picks"
+    }
+  ]
+}

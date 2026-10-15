@@ -1,0 +1,1 @@
+{"d":{"requestId":"filters/Spout2 Capture","requestStatus":{"code":100,"result":true},"requestType":"GetSourceFilterList","responseData":{"filters":[{"filterEnabled":true,"filterIndex":0,"filterKind":"mask_filter_v2","filterName":"Image Mask/Blend","filterSettings":{"image_path":"C:/Users/streamer/Downloads/Alpha gradient.png"}}]}},"op":7}

@@ -1,0 +1,3 @@
+# The repo's Sponsor button. The same link is SUPPORT_URL in
+# crates/protocol/src/update.rs (Status's "Support the project").
+custom: ["https://paypal.me/marhag87"]

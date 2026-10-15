@@ -1,0 +1,11 @@
+@ban-duration=300;room-id=552120296;target-user-id=1000032;tmi-sent-ts=1791491208107 :tmi.twitch.tv CLEARCHAT #zackrawrr :viewer31
+@ban-duration=300;room-id=22484632;target-user-id=1000033;tmi-sent-ts=1791491214957 :tmi.twitch.tv CLEARCHAT #forsen :viewer32
+@ban-duration=10800;room-id=96858382;target-user-id=1000034;tmi-sent-ts=1791491217544 :tmi.twitch.tv CLEARCHAT #erobb221 :viewer33
+@ban-duration=60;room-id=411377640;target-user-id=1000035;tmi-sent-ts=1791491218213 :tmi.twitch.tv CLEARCHAT #jynxzi :viewer34
+@ban-duration=30;room-id=411377640;target-user-id=1000036;tmi-sent-ts=1791491218738 :tmi.twitch.tv CLEARCHAT #jynxzi :viewer35
+@ban-duration=300;room-id=22484632;target-user-id=1000037;tmi-sent-ts=1791491225943 :tmi.twitch.tv CLEARCHAT #forsen :viewer36
+:tmi.twitch.tv CAP * ACK :twitch.tv/tags twitch.tv/commands
+:tmi.twitch.tv 001 justinfan58321 :Welcome, GLHF!
+:viewer37!viewer37@viewer37.tmi.twitch.tv JOIN #kaicenat
+:justinfan58321.tmi.twitch.tv 353 justinfan58321 = #kaicenat :justinfan58321
+:justinfan58321.tmi.twitch.tv 366 justinfan58321 #kaicenat :End of /NAMES list

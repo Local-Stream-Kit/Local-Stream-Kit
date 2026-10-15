@@ -1,0 +1,24 @@
+{
+  "id": "sound",
+  "name": "Sounds",
+  "version": "1.0.0",
+  "api": 1,
+  "author": "Local Stream Kit",
+  "nodes": [
+    {
+      "id": "play",
+      "title": "Sound",
+      "category": "effects",
+      "queue": "optional",
+      "inputs": [
+        { "name": "trigger", "label": "Trigger", "type": "event" },
+        { "name": "volume", "label": "Volume (%)", "type": "number" }
+      ],
+      "settings": [
+        { "key": "sound", "label": "Sound", "type": "sound", "required": true },
+        { "key": "volume", "label": "Volume (%)", "type": "number", "default": 80, "min": 0, "max": 100 },
+        { "key": "queue", "label": "Wait in the queue", "type": "bool", "default": false }
+      ]
+    }
+  ]
+}

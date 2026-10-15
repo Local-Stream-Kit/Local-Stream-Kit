@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>The markup and its classes</title>
+  <style>
+    body { margin: 0; padding: 10px 12px; font: 13px/1.45 system-ui, sans-serif; color: #1d1e24; background: #fff; }
+    h1 { margin: 0 0 6px; font-size: 14px; }
+    p { margin: 6px 0; }
+    pre, code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+    pre { margin: 0; padding: 8px; overflow-x: auto; border-radius: 6px; background: #f1f2f5; }
+    ul { margin: 0; padding-left: 16px; }
+    li { margin: 3px 0; }
+    li span { color: #5c5f6b; }
+  </style>
+</head>
+<body>
+  <h1>The markup and its classes</h1>
+  <p>The look is your CSS: it styles this markup. Each message is a <code>.msg</code> in <code>.chat</code>, newest last:</p>
+  <pre>.chat
+  .msg …classes
+    .msg__reply
+      .msg__reply-name  .msg__reply-text
+    .msg__head
+      .msg__badges &gt; img.badge.badge--&lt;set&gt;
+      .msg__name
+    .msg__body
+      text, span.emote &gt; img.emote__image
+                         (+ img.emote__overlay)
+      span.text-style.text-style-&lt;name&gt;  (a part a card's text marked)</pre>
+  <p><code>.msg__head</code> is left out when a line has no name, <code>.msg__badges</code> when it has no badges, <code>.msg__reply</code> unless it's a reply (and "Show the message a reply answers" is on). The name's colour is <code>var(--name-color)</code>.</p>
+  <p>Classes on <code>.msg</code>, each when it applies:</p>
+  <ul>
+    <li><code>.msg--chat</code> <span>a viewer's message</span></li>
+    <li><code>.msg--card</code> <span>from a card's Show in chat node, with the node's class</span></li>
+    <li><code>.msg--from-twitch</code> <span>the platform it came from</span></li>
+    <li><code>.msg--single-emote</code> <span>one emote and nothing else</span></li>
+    <li><code>.msg--emotes-only</code> <span>two or more emotes and nothing else</span></li>
+    <li><code>.msg--text</code> <span>any text, with or without emotes</span></li>
+    <li><code>.msg--broadcaster .msg--moderator .msg--vip .msg--member</code> <span>who wrote it</span></li>
+    <li><code>.msg--action</code> <span>a /me message</span></li>
+    <li><code>.msg--highlighted</code> <span>paid to be highlighted</span></li>
+    <li><code>.msg--first</code> <span>the viewer's first message in the channel</span></li>
+    <li><code>.msg--reward</code> <span>sent with a channel point reward</span></li>
+    <li><code>.msg--cheer</code> <span>came with bits</span></li>
+    <li><code>.msg--reply</code> <span>answers another message (<code>.msg__reply</code> shows which, unless that's turned off)</span></li>
+    <li><code>.msg--restored</code> <span>shown again after the Browser Source reloaded, so CSS can skip its entrance</span></li>
+    <li><code>.msg--leaving</code> <span>on its way out; it's removed when its animation or transition ends</span></li>
+  </ul>
+  <p>A Show in chat node's text can mark parts with a text style (Plugins → Text styles), <code>[highlight]{viewer}[/]</code>: the part is in a <code>span.text-style.text-style-highlight</code> with the style's font, size and colour inline, which your CSS can add to or override.</p>
+  <p>Fonts can come from Google Fonts (<code>@import url("https://fonts.googleapis.com/css2?…")</code>).</p>
+</body>
+</html>

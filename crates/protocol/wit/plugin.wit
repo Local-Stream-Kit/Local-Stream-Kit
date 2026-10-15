@@ -1,0 +1,452 @@
+// The interface between Local Stream Kit and a plugin's server code: a
+// WebAssembly component (`server.wasm` in the plugin's folder) built for
+// the `plugin` world below. See docs/writing-a-plugin.md → Server code.
+//
+// The app calls the plugin one thing at a time (`start`, an effect node's
+// `run`, a flow node's `route`, a value node's `compute`, the chat and the
+// events it hears, a timer, a web answer, a socket message), each within a
+// time limit, and does all the waiting itself: nothing here blocks, so a
+// plugin needs no async. A card never waits on a plugin either: an event
+// that reaches a plugin's flow or value node waits for its answer while
+// the cards carry on with other events. Web requests and sockets only
+// reach the hosts listed in the plugin's `plugin.json` (`hosts`).
+package lsk:plugin@0.5.0;
+
+interface types {
+    /// An emote: its code, its image's path on the app (`/emote/…`), and
+    /// the paths of the zero-width emotes stacked on it.
+    record emote {
+        code: string,
+        url: string,
+        overlays: list<string>,
+    }
+
+    variant text-part {
+        text(string),
+        emote(emote),
+    }
+
+    /// A text with the emotes in it; `plain` is all of it as plain text.
+    record text {
+        plain: string,
+        parts: list<text-part>,
+    }
+
+    /// What an effect node gets for one of its inputs or settings.
+    variant value {
+        number(f64),
+        text(text),
+        emotes(list<emote>),
+        /// A tick box.
+        toggle(bool),
+        /// A colour (`#rrggbb`), a choice's value, or a picture's path.
+        plain(string),
+        /// A picture or media setting with nothing chosen.
+        empty,
+    }
+
+    record named-value {
+        name: string,
+        value: value,
+    }
+
+    /// One of a list of choices (`host.set-choices`): what it stores, and
+    /// what the panel shows for it.
+    record choice {
+        value: string,
+        label: string,
+    }
+
+    /// What an event node's output is given (`host.emit`): a number, a
+    /// text (emote codes in it become emotes), or emote codes.
+    variant event-value {
+        number(f64),
+        text(string),
+        emotes(list<string>),
+    }
+
+    record named-event-value {
+        name: string,
+        value: event-value,
+    }
+
+    record header {
+        name: string,
+        value: string,
+    }
+
+    record request {
+        /// `GET`, `POST`, …
+        method: string,
+        url: string,
+        headers: list<header>,
+        body: list<u8>,
+    }
+
+    record response {
+        status: u16,
+        headers: list<header>,
+        body: list<u8>,
+    }
+
+    variant socket-event {
+        opened,
+        /// A text message.
+        message(string),
+        /// A binary message (at most 4 MB: a bigger one closes the
+        /// socket, saying so).
+        binary(list<u8>),
+        /// Closed by the other end or failed, with why. Also for a
+        /// connection that never opened (nothing listening, refused; on
+        /// Windows only after about 2 s), with no `opened` before it.
+        closed(string),
+    }
+
+    /// A message read aloud: its audio, a whole `wav`, `mp3` or `ogg` file
+    /// (`format`).
+    record audio {
+        data: list<u8>,
+        format: string,
+    }
+
+    enum level {
+        error,
+        warn,
+        info,
+        debug,
+    }
+
+    /// Where the event a card runs for came from: the stream, a test (the
+    /// panel's Test, "Test this card"), or an event from the history
+    /// played again.
+    enum run-origin {
+        live,
+        test,
+        replay,
+    }
+
+    record roles {
+        broadcaster: bool,
+        moderator: bool,
+        vip: bool,
+        /// A subscriber (a member on other platforms).
+        member: bool,
+    }
+
+    /// The viewer who set an event off.
+    record viewer {
+        /// `twitch`, …
+        platform: string,
+        id: string,
+        /// Their login.
+        name: string,
+        display-name: string,
+        /// `#rrggbb`, if they chose one.
+        color: option<string>,
+        roles: roles,
+    }
+
+    /// Where a flow node sends an event on: one of its event outputs, and
+    /// what its other outputs (number, text, emotes) carry for this
+    /// event, by name. An output left out gives nothing.
+    record route {
+        output: string,
+        values: list<named-value>,
+    }
+
+    /// A flow node's answer to `route`.
+    variant routed {
+        /// On, now.
+        go(route),
+        /// Nowhere: the event stops here.
+        stop,
+        /// The plugin answers with `host.route-later` (within an hour).
+        later,
+    }
+
+    /// A value node's answer to `compute`.
+    variant computed {
+        /// Its outputs' values, by name; an output left out gives nothing.
+        now(list<named-value>),
+        /// The plugin answers with `host.compute-later` (within 10
+        /// seconds).
+        later,
+    }
+
+    record chat-marks {
+        /// `/me`.
+        action: bool,
+        highlighted: bool,
+        /// The viewer's first message in the channel.
+        first: bool,
+        /// Sent with a channel point reward.
+        reward: bool,
+        /// Has bits in it.
+        cheer: bool,
+        /// Answers another message.
+        reply: bool,
+    }
+
+    /// A chat message.
+    record chat-line {
+        /// Unique while the app runs (`twitch:<message id>`): what
+        /// `heard-chat.removed` names.
+        id: string,
+        platform: string,
+        /// When it was said (Unix ms).
+        at-ms: u64,
+        viewer: viewer,
+        text: text,
+        marks: chat-marks,
+    }
+
+    record removed-viewer {
+        platform: string,
+        /// The viewer's id.
+        id: string,
+    }
+
+    /// What a plugin that hears the chat hears.
+    variant heard-chat {
+        line(chat-line),
+        /// A message a moderator took off, by its id.
+        removed(string),
+        /// Every message of a viewer taken off (a timeout or a ban).
+        viewer-removed(removed-viewer),
+        /// The whole chat cleared, on this platform.
+        cleared(string),
+    }
+
+    /// An event, for a plugin that hears events.
+    record heard-event {
+        /// The built-in event node it is for: `bits`, `sub`, `gift_bomb`,
+        /// `raid`, `reward`, `follow`, `hype_train` or `custom` (chat
+        /// messages are heard as chat).
+        kind: string,
+        /// "Viewer cheered 100 bits".
+        summary: string,
+        viewer: option<viewer>,
+        /// What that event node's outputs carry, by name.
+        values: list<named-value>,
+        origin: run-origin,
+    }
+
+    /// One of the plugin's event nodes, placed on a card.
+    record placed-node {
+        /// `<card id>/<node id>`: what `host.emit-to` takes.
+        id: string,
+        /// Its node type's id in plugin.json.
+        node: string,
+        /// The card's name.
+        card: string,
+        /// Whether the card is on.
+        on: bool,
+        /// Its settings that are for the plugin (not the filters), every
+        /// one with a value; a list (`many`) as a text, a line each.
+        settings: list<named-value>,
+    }
+
+    /// A status's colour on the panel.
+    enum status-level {
+        /// Working (green).
+        ok,
+        /// Nothing wrong, waiting for something (grey).
+        waiting,
+        /// Needs the user (orange; the header's Plugins dot shows).
+        problem,
+    }
+}
+
+/// What the app offers a plugin.
+interface host {
+    use types.{audio, choice, level, named-event-value, named-value, request, status-level};
+
+    /// A line in the app's log, marked with the plugin's id.
+    log: func(level: level, message: string);
+
+    /// Fires one of the plugin's event nodes: cards starting with it run.
+    /// `values` by output name.
+    emit: func(node: string, values: list<named-event-value>);
+
+    /// Fires another of an event node's outputs than `event` (one of type
+    /// event in its manifest's `outputs`, "ended" say): cards wired from
+    /// that output run. `values` as for `emit`.
+    emit-output: func(node: string, output: string, values: list<named-event-value>);
+
+    /// Sends a message to the plugin's overlay page, which gets
+    /// `{ "type": "message", "data": … }`. `json` must be JSON.
+    send-to-page: func(json: string);
+
+    /// Calls `on-timer` with the returned id after `ms` milliseconds (at
+    /// least 10), and every `ms` if `repeat`.
+    set-timer: func(ms: u32, repeat: bool) -> u32;
+    cancel-timer: func(id: u32);
+
+    /// Starts a web request (http or https, to a host the plugin lists);
+    /// `on-response` gets the answer with the returned id.
+    fetch: func(request: request) -> result<u32, string>;
+
+    /// Opens a WebSocket (ws or wss, to a host the plugin lists);
+    /// `on-socket` hears it with the returned id.
+    connect: func(url: string) -> result<u32, string>;
+    /// A text message, at most 4 MB (a bigger one isn't sent).
+    send: func(socket: u32, text: string);
+    /// A binary message, at most 4 MB (a bigger one isn't sent).
+    send-binary: func(socket: u32, data: list<u8>);
+    close: func(socket: u32);
+
+    /// The plugin-wide settings (the manifest's `settings`), as set on the
+    /// panel's Plugins page, every one with a value. Read them when
+    /// they're needed: they can change while the plugin runs.
+    settings: func() -> list<named-value>;
+
+    /// The answer to a `speak` call with the same `request`: the message,
+    /// or why it couldn't be made. Within 30 seconds; at most 8 MB.
+    spoken: func(request: u32, audio: result<audio, string>);
+
+    /// Fills in a list of choices, by name ("scenes"), replacing what it
+    /// had: text settings whose `suggest_from` names it offer them on the
+    /// panel. An empty list takes it away. Kept while the app runs, at
+    /// most 1000 lists of 1000 choices of 200 bytes.
+    set-options: func(name: string, options: list<string>);
+
+    /// The same, with each choice showing one thing (`label`, what the
+    /// panel's dropdown says) and storing another (`value`, what the
+    /// setting keeps, and what the plugin gets): a label can change without
+    /// breaking the cards that picked it. An empty label shows the value.
+    set-choices: func(name: string, choices: list<choice>);
+
+    /// The plugin's status on its Plugins box, a few words
+    /// ("Connected", "Wrong password"): at most 32 characters (longer is
+    /// cut); empty takes it away. Cleared when the plugin stops or
+    /// starts again.
+    set-status: func(level: status-level, text: string);
+
+    /// A note under one of the plugin-wide settings (the manifest's
+    /// `settings`, by key) on its Plugins box, or on the box itself (an
+    /// empty `setting`): what the status has no room for, a line each
+    /// ("Chat in WoW is shown at…"). `problem` shows it
+    /// orange. Empty `lines` takes it away. At most 20 lines of 300
+    /// characters (more is cut). Cleared when the plugin stops or starts
+    /// again.
+    set-note: func(setting: string, level: status-level, lines: list<string>);
+
+    /// Fires one of an effect node's own outputs (its manifest's
+    /// `outputs`) for the run `run`, as `run` gave it: the card carries on
+    /// from there with the event that set the run off. Each output once
+    /// per run; runs are forgotten after an hour, and when the app
+    /// restarts.
+    carry-on: func(run: u64, output: string);
+
+    /// A queued run (`run`'s `queue-id`) has finished: the queue moves on,
+    /// and its node's Ended output fires. Only for the run on stage; one
+    /// that never says so is given two minutes.
+    done: func(queue-id: u64);
+
+    /// The answer to a `route` that said `later`: the event goes on from
+    /// `output` (one of the node's event outputs), with `values` on its
+    /// other outputs. Within an hour; each output once per run.
+    route-later: func(run: u64, output: string, values: list<named-value>);
+
+    /// The answer to a `compute` that said `later`. Within 10 seconds;
+    /// after that the inputs wired from the node fall back to their
+    /// settings.
+    compute-later: func(run: u64, values: list<named-value>);
+
+    /// Fires one placed copy of an event node (`placed-node.id`, from
+    /// `nodes-changed`), not every copy as `emit` does: `output` as for
+    /// `emit-output` (`event` for the usual one).
+    emit-to: func(placed: string, output: string, values: list<named-event-value>);
+
+    /// The port the app's overlays and panel are on (5750 unless changed):
+    /// its pages are `http://localhost:<port>/…`.
+    app-port: func() -> u16;
+
+    /// The plugin's own stored values, kept between runs of the app.
+    get: func(key: string) -> option<string>;
+    /// `none` removes the key.
+    set: func(key: string, value: option<string>);
+}
+
+world plugin {
+    import host;
+    use types.{
+        computed, heard-chat, heard-event, named-value, placed-node, response, routed, run-origin,
+        socket-event, viewer,
+    };
+
+    /// Called once, when the app starts.
+    export start: func();
+
+    /// One of the plugin's effect nodes fired: `input` is the event input
+    /// the event came into; `values` every other input and every setting.
+    /// `run` is there when one of the node's own outputs is wired: give it
+    /// to `host.carry-on` to fire one. `queue-id` is there when the node
+    /// waits in the queue (its `queue`) and this run's turn has come: say
+    /// `host.done` with it when it has finished.
+    export run: func(
+        node: string,
+        input: string,
+        values: list<named-value>,
+        run: option<u64>,
+        queue-id: option<u64>,
+    );
+
+    /// The queued run `queue-id` was skipped (the panel's Skip) before it
+    /// said it was done: undo what it did if it stays on (hide a source it
+    /// showed). Its Ended doesn't fire, and it needn't say `done`.
+    export skip: func(queue-id: u64);
+
+    /// Its plugin-wide settings changed: on the panel's Plugins page (not
+    /// its presets'), a secret saved or forgotten, a file setting's file
+    /// edited. `host.settings` has the new ones; a plugin that acted on
+    /// the old ones acts again here. Not called at `start`.
+    export settings-changed: func();
+
+    /// One of the plugin's flow nodes got an event on `input`: where does
+    /// it go? `values` every other input and every setting; `viewer` who
+    /// set it off, if anyone. `run` is for `host.route-later`.
+    export route: func(
+        node: string,
+        input: string,
+        values: list<named-value>,
+        viewer: option<viewer>,
+        run: u64,
+        origin: run-origin,
+    ) -> routed;
+
+    /// One of the plugin's value nodes is needed for an event: its
+    /// outputs' values, from its inputs and settings (`values`). Asked once
+    /// per event. `run` is for `host.compute-later`.
+    export compute: func(
+        node: string,
+        values: list<named-value>,
+        run: u64,
+        origin: run-origin,
+    ) -> computed;
+
+    /// For a plugin that hears the chat (`hears: ["chat"]`, allowed on the
+    /// Plugins page): every chat message, and moderators taking some off.
+    export on-chat: func(heard: heard-chat);
+
+    /// For a plugin that hears events (`hears: ["events"]`, allowed on the
+    /// Plugins page): every event (but plugins'), tests and replays too,
+    /// marked as such.
+    export on-event: func(heard: heard-event);
+
+    /// Its event nodes placed on cards, every one: right after `start`,
+    /// and again when the cards change them (one added or removed, its
+    /// settings changed, its card switched on or off).
+    export nodes-changed: func(nodes: list<placed-node>);
+
+    export on-timer: func(id: u32);
+    export on-response: func(id: u32, response: result<response, string>);
+    export on-socket: func(id: u32, event: socket-event);
+
+    /// Text to speech, for a plugin with `voices` in its plugin.json:
+    /// make `text` in `voice` (one of its voices' ids) at `speed` (1 is
+    /// normal, 0.5 to 2), and answer with `host.spoken` and the same
+    /// `request` (after web requests, say). Plugins without voices are
+    /// never called.
+    export speak: func(request: u32, voice: string, text: string, speed: f32);
+}

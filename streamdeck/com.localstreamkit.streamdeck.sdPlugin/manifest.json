@@ -1,0 +1,121 @@
+{
+	"Name": "Local Stream Kit",
+	"Version": "0.1.0.0",
+	"Author": "Local Stream Kit",
+	"Description": "Switch Local Stream Kit's cards and effects, run its alert queue, fire Custom events and mark its history seen, with keys that show what's on.",
+	"Category": "Local Stream Kit",
+	"CategoryIcon": "imgs/category",
+	"Icon": "imgs/plugin",
+	"CodePath": "bin/plugin.js",
+	"PropertyInspectorPath": "ui/settings.html",
+	"SDKVersion": 3,
+	"Software": {
+		"MinimumVersion": "7.1"
+	},
+	"OS": [
+		{
+			"Platform": "mac",
+			"MinimumVersion": "12"
+		},
+		{
+			"Platform": "windows",
+			"MinimumVersion": "10"
+		}
+	],
+	"Nodejs": {
+		"Version": "24"
+	},
+	"UUID": "com.localstreamkit.streamdeck",
+	"Actions": [
+		{
+			"Name": "Card on / off",
+			"UUID": "com.localstreamkit.streamdeck.card",
+			"Icon": "imgs/actions/card",
+			"Tooltip": "Turns a card on or off, and shows whether it's on.",
+			"Controllers": [
+				"Keypad"
+			],
+			"States": [
+				{
+					"Image": "imgs/keys/card",
+					"TitleAlignment": "bottom"
+				}
+			]
+		},
+		{
+			"Name": "Effect on / off",
+			"UUID": "com.localstreamkit.streamdeck.effect",
+			"Icon": "imgs/actions/effect",
+			"Tooltip": "Turns an effect (emote rain, alerts, sounds, text to speech) on or off.",
+			"Controllers": [
+				"Keypad"
+			],
+			"States": [
+				{
+					"Image": "imgs/keys/effect",
+					"TitleAlignment": "bottom"
+				}
+			]
+		},
+		{
+			"Name": "Queue",
+			"UUID": "com.localstreamkit.streamdeck.queue",
+			"Icon": "imgs/actions/queue",
+			"Tooltip": "Pauses, resumes, skips or clears the alert queue.",
+			"Controllers": [
+				"Keypad"
+			],
+			"States": [
+				{
+					"Image": "imgs/keys/queue",
+					"TitleAlignment": "bottom"
+				}
+			]
+		},
+		{
+			"Name": "Mute",
+			"UUID": "com.localstreamkit.streamdeck.mute",
+			"Icon": "imgs/actions/mute",
+			"Tooltip": "Mutes or unmutes every sound on the overlays, live; shows the master volume.",
+			"Controllers": [
+				"Keypad"
+			],
+			"States": [
+				{
+					"Image": "imgs/keys/mute",
+					"TitleAlignment": "bottom"
+				}
+			]
+		},
+		{
+			"Name": "Mark history seen",
+			"UUID": "com.localstreamkit.streamdeck.history",
+			"Icon": "imgs/actions/history",
+			"Tooltip": "Marks every event in the History seen (the panel's All seen); shows how many are new.",
+			"Controllers": [
+				"Keypad"
+			],
+			"States": [
+				{
+					"Image": "imgs/keys/history",
+					"TitleAlignment": "bottom"
+				}
+			]
+		},
+		{
+			"Name": "Fire event",
+			"UUID": "com.localstreamkit.streamdeck.event",
+			"Icon": "imgs/actions/event",
+			"Tooltip": "Fires a Custom event: the cards that start with it run.",
+			"Controllers": [
+				"Keypad"
+			],
+			"States": [
+				{
+					"Image": "imgs/keys/event",
+					"TitleAlignment": "bottom"
+				}
+			]
+		}
+	]
+}

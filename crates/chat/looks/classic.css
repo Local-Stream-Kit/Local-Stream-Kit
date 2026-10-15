@@ -1,0 +1,112 @@
+/* Classic: one line per message, as in Twitch's own chat: badges, the
+   name in its colour, a colon and the text, white with a dark outline so
+   it reads over any scene. On the panel's Plugins → Chat display, typing
+   in it (✎) makes a copy of your own, saved in plugin_data/chat/look/
+   next to lsk.json, which any editor can change too. */
+
+@import url("https://fonts.googleapis.com/css2?family=Roboto:wght@500;700&display=swap");
+
+/* The whole chat: newest at the bottom. */
+.chat {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 4px;
+  padding: 12px;
+  box-sizing: border-box;
+  font-family: "Roboto", "Segoe UI", sans-serif;
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.45;
+  color: #ffffff;
+  text-shadow: 0 0 2px #000000, 0 0 2px #000000, 1px 1px 2px #000000;
+}
+
+.msg {
+  overflow-wrap: anywhere;
+  animation: msg-in 200ms ease-out both;
+}
+.msg.msg--restored {
+  animation: none;
+}
+.msg.msg--leaving {
+  animation: msg-out 300ms ease-in both;
+}
+
+/* Badges, the name and the text flow on one line. */
+.msg__head,
+.msg__body {
+  display: inline;
+}
+.badge {
+  height: 1em;
+  margin-right: 4px;
+  vertical-align: -0.12em;
+}
+.msg__name {
+  color: var(--name-color, #b98aff);
+}
+.msg__name::after {
+  content: ": ";
+  color: #ffffff;
+}
+.msg__body .emote__image {
+  height: 1.5em;
+}
+.msg--single-emote .msg__body .emote__image {
+  height: 2.2em;
+}
+
+/* What a reply answers, small, on the line above. */
+.msg__reply {
+  font-size: 0.65em;
+  font-weight: 500;
+  opacity: 0.85;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.msg__reply-name::before {
+  content: "↪ Replying to @";
+}
+.msg__reply-name::after {
+  content: ":";
+}
+
+/* /me messages: no colon, the text in the name's colour. */
+.msg--action .msg__name::after {
+  content: " ";
+}
+.msg--action .msg__body {
+  color: var(--name-color, #b98aff);
+  font-style: italic;
+}
+
+/* Highlighted, and first-time chatters: a stripe on the left. */
+.msg--highlighted,
+.msg--first {
+  padding: 2px 8px;
+  border-radius: 4px;
+  border-left: 3px solid #9b7cf7;
+  background: rgba(117, 94, 188, 0.4);
+}
+.msg--first {
+  border-left-color: #4ade80;
+  background: rgba(74, 222, 128, 0.2);
+}
+
+/* Lines from a card's Show in chat node (subs, raids, …). */
+.msg--card .msg__body {
+  color: #ffd76a;
+}
+
+@keyframes msg-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes msg-out {
+  to {
+    opacity: 0;
+  }
+}

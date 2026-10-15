@@ -1,0 +1,166 @@
+{
+  "id": "obs",
+  "name": "OBS",
+  "version": "1.0.0",
+  "api": 1,
+  "author": "Local Stream Kit",
+  "description": "Controls OBS through obs-websocket (Tools → WebSocket Server Settings in OBS 28 and later).",
+  "hosts": ["localhost", "127.0.0.1"],
+  "nodes": [
+    {
+      "id": "switch_scene",
+      "title": "Switch scene",
+      "category": "effects",
+      "inputs": [
+        { "name": "trigger", "label": "Trigger", "type": "event" }
+      ],
+      "outputs": [
+        { "name": "started", "label": "Started", "type": "event" },
+        { "name": "ended", "label": "Ended", "type": "event" }
+      ],
+      "settings": [
+        { "key": "scene", "label": "Scene", "type": "text", "suggest_from": "scenes",
+          "placeholder": "Pick a scene" }
+      ]
+    },
+    {
+      "id": "show_source",
+      "title": "Show / hide a source",
+      "category": "effects",
+      "queue": "optional",
+      "describe": "source",
+      "inputs": [
+        { "name": "trigger", "label": "Trigger", "type": "event" }
+      ],
+      "settings": [
+        { "key": "scene", "label": "Scene", "type": "text", "suggest_from": "scenes",
+          "placeholder": "Pick a scene" },
+        { "key": "source", "label": "Source", "type": "text", "suggest_from": "sources/{scene}",
+          "placeholder": "Pick a source" },
+        { "key": "action", "label": "Do", "type": "choice", "default": "show",
+          "options": [
+            { "value": "show", "label": "Show" },
+            { "value": "hide", "label": "Hide" },
+            { "value": "toggle", "label": "Toggle" }
+          ] },
+        { "key": "seconds", "label": "For (s, 0 = stays)", "type": "number", "default": 0,
+          "min": 0, "max": 3600 },
+        { "key": "queue", "label": "Wait in the queue", "type": "bool", "default": false }
+      ]
+    },
+    {
+      "id": "filter",
+      "title": "Filter on / off",
+      "category": "effects",
+      "queue": "optional",
+      "describe": "filter",
+      "inputs": [
+        { "name": "trigger", "label": "Trigger", "type": "event" }
+      ],
+      "settings": [
+        { "key": "source", "label": "Source", "type": "text", "suggest_from": "filtered",
+          "placeholder": "Pick a source" },
+        { "key": "filter", "label": "Filter", "type": "text", "suggest_from": "filters/{source}",
+          "placeholder": "Pick a filter" },
+        { "key": "action", "label": "Do", "type": "choice", "default": "on",
+          "options": [
+            { "value": "on", "label": "Switch on" },
+            { "value": "off", "label": "Switch off" },
+            { "value": "toggle", "label": "Toggle" }
+          ] },
+        { "key": "seconds", "label": "For (s, 0 = stays)", "type": "number", "default": 0,
+          "min": 0, "max": 3600 },
+        { "key": "queue", "label": "Wait in the queue", "type": "bool", "default": false }
+      ]
+    },
+    {
+      "id": "mute",
+      "title": "Mute",
+      "category": "effects",
+      "inputs": [
+        { "name": "trigger", "label": "Trigger", "type": "event" }
+      ],
+      "settings": [
+        { "key": "input", "label": "Input", "type": "text", "suggest_from": "inputs",
+          "placeholder": "Pick an input" },
+        { "key": "action", "label": "Do", "type": "choice", "default": "mute",
+          "options": [
+            { "value": "mute", "label": "Mute" },
+            { "value": "unmute", "label": "Unmute" },
+            { "value": "toggle", "label": "Toggle" }
+          ] }
+      ]
+    },
+    {
+      "id": "set_text",
+      "title": "Set a text",
+      "category": "effects",
+      "inputs": [
+        { "name": "trigger", "label": "Trigger", "type": "event" },
+        { "name": "text", "label": "Text", "type": "text" }
+      ],
+      "settings": [
+        { "key": "source", "label": "Text source", "type": "text", "suggest_from": "texts",
+          "placeholder": "Pick a text source" },
+        { "key": "text", "label": "Text", "type": "text", "default": "{summary}" }
+      ]
+    },
+    {
+      "id": "scene_changed",
+      "title": "Scene changed",
+      "category": "events",
+      "outputs": [
+        { "name": "event", "label": "Event", "type": "event" },
+        { "name": "scene", "label": "Scene", "type": "text" }
+      ],
+      "settings": [
+        { "key": "scene", "label": "Scenes", "type": "text", "many": true, "suggest_from": "scenes",
+          "placeholder": "Any scene" }
+      ]
+    },
+    {
+      "id": "stream_started",
+      "title": "Stream started",
+      "category": "events",
+      "outputs": [
+        { "name": "event", "label": "Event", "type": "event" }
+      ]
+    },
+    {
+      "id": "stream_ended",
+      "title": "Stream ended",
+      "category": "events",
+      "outputs": [
+        { "name": "event", "label": "Event", "type": "event" }
+      ]
+    },
+    {
+      "id": "recording_started",
+      "title": "Recording started",
+      "category": "events",
+      "outputs": [
+        { "name": "event", "label": "Event", "type": "event" }
+      ]
+    },
+    {
+      "id": "recording_ended",
+      "title": "Recording ended",
+      "category": "events",
+      "outputs": [
+        { "name": "event", "label": "Event", "type": "event" },
+        { "name": "file", "label": "File", "type": "text" }
+      ]
+    }
+  ],
+  "settings": [
+    { "key": "address", "label": "Address", "type": "text", "default": "localhost:4455",
+      "placeholder": "localhost:4455" },
+    { "key": "password", "label": "Password", "type": "secret",
+      "placeholder": "None (authentication off in OBS)" },
+    { "key": "scaled", "label": "Scaled overlays", "type": "choice", "default": "warn",
+      "options": [
+        { "value": "warn", "label": "Warn" },
+        { "value": "fix", "label": "Resize" }
+      ] }
+  ]
+}

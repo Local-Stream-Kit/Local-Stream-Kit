@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Local Stream Kit overlay</title>
+  <!-- Release builds run wasm-opt. Level 2 optimises for speed and takes
+       ~17 s; trunk's default (size) level took ~90 s for a 1% smaller file,
+       which doesn't matter when the overlay loads from localhost. -->
+  <link data-trunk rel="rust" data-wasm-opt="2" />
+  <style>
+    /* Transparent, so only the effects composite into OBS. */
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: transparent;
+    }
+
+    /* One full-size layer per plugin page, stacked. */
+    .layer {
+      position: fixed;
+      inset: 0;
+      overflow: hidden;
+      pointer-events: none;
+    }
+    /* A plugin's page: an iframe doesn't stretch to its insets by itself. */
+    iframe.layer {
+      width: 100%;
+      height: 100%;
+      border: 0;
+      background: transparent;
+    }
+  </style>
+</head>
+<body></body>
+</html>

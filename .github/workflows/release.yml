@@ -1,0 +1,89 @@
+# A version tag (pushed by `cargo release`) → a draft release with lsk.exe
+# and its signed update feed. The notes are written in the draft, then
+# Publish; until then the app's update check doesn't see it.
+#
+# Every action is pinned to a full commit SHA, with its version beside it.
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions: {}
+
+jobs:
+  release:
+    runs-on: windows-latest
+    # Holds LSK_RELEASE_KEY, and only runs for v* tags.
+    environment: Release
+    permissions:
+      contents: write
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Rust, with the WebAssembly targets
+        run: |
+          rustup toolchain install stable --profile minimal --component clippy --target wasm32-unknown-unknown,wasm32-wasip2
+          rustup default stable
+
+      # The cache is kept per tag: it speeds up a re-run of this tag's run
+      # (after fixing the key, say), not the next release's.
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      - name: The tag is Cargo.toml's version, and Cargo.lock is up to date
+        shell: pwsh
+        run: |
+          $metadata = cargo metadata --format-version 1 --locked | ConvertFrom-Json
+          if ($LASTEXITCODE) { throw 'cargo metadata failed: is Cargo.lock up to date?' }
+          $version = ($metadata.packages | Where-Object { $_.name -eq 'lsk' -and -not $_.source }).version
+          if ("v$version" -cne $env:GITHUB_REF_NAME) {
+            throw "The tag $env:GITHUB_REF_NAME isn't the version in Cargo.toml ($version)"
+          }
+
+      - name: trunk 0.21.14, prebuilt
+        shell: pwsh
+        run: |
+          $version = '0.21.14'
+          $sha256 = 'cd6ac15b9daff0365e5695036791ef2ce3c63f61c014f5a8c532363266e4569c'
+          $zip = Join-Path $env:RUNNER_TEMP 'trunk.zip'
+          $url = "https://github.com/trunk-rs/trunk/releases/download/v$version/trunk-x86_64-pc-windows-msvc.zip"
+          Invoke-WebRequest $url -OutFile $zip
+          if ((Get-FileHash $zip -Algorithm SHA256).Hash -ne $sha256) { throw "trunk.zip isn't the one pinned here" }
+          $dir = Join-Path $env:RUNNER_TEMP 'trunk'
+          Expand-Archive $zip -DestinationPath $dir
+          $exe = Get-ChildItem $dir -Recurse -Filter trunk.exe | Select-Object -First 1
+          if (-not $exe) { throw 'trunk.zip has no trunk.exe' }
+          Add-Content $env:GITHUB_PATH $exe.DirectoryName
+
+      # First: the server's unit tests read the built-in plugins' pages and
+      # server code, which this builds (they aren't in the repo).
+      - name: cargo dist
+        run: cargo dist
+
+      - name: Unit tests
+        run: cargo test --locked -p protocol -p lsk -p panel -p xtask
+
+      - name: Clippy
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
+
+      - name: The update feed, signed
+        env:
+          LSK_RELEASE_KEY: ${{ secrets.LSK_RELEASE_KEY }}
+        run: cargo feed target/release/lsk.exe
+
+      - name: The draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --draft --verify-tag \
+            --title "Local Stream Kit ${GITHUB_REF_NAME#v}" \
+            --notes-file .github/release-notes.md \
+            target/release/lsk.exe target/release/latest.json target/release/latest.json.sig

@@ -1,0 +1,84 @@
+{
+  "id": "alert",
+  "name": "Alerts",
+  "version": "1.0.0",
+  "api": 1,
+  "author": "Local Stream Kit",
+  "page_hosts": ["fonts.googleapis.com", "fonts.gstatic.com"],
+  "presets": { "label": "Style" },
+  "preview": {
+    "node": "alert",
+    "values": { "message": "TestViewer redeemed Hydrate: stay hydrated!", "duration": 5 }
+  },
+  "settings": [
+    { "key": "position", "label": "Position", "type": "position", "default": "top" },
+    { "key": "animation", "label": "Animation", "type": "choice", "default": "slide_down",
+      "options": [
+        { "value": "slide_down", "label": "Slide down" },
+        { "value": "slide_up", "label": "Slide up" },
+        { "value": "fade", "label": "Fade" },
+        { "value": "pop", "label": "Pop" },
+        { "value": "none", "label": "None" }
+      ] },
+    { "key": "font", "label": "Font", "type": "text", "group": "Text", "default": "Segoe UI",
+      "suggestions": ["Arial", "Arial Black", "Comic Sans MS", "Consolas", "Georgia", "Impact", "Segoe UI",
+        "Trebuchet MS", "Verdana", "Bangers", "Bebas Neue", "Lilita One", "Luckiest Guy", "Montserrat",
+        "Permanent Marker", "Poppins", "Press Start 2P", "Russo One"] },
+    { "key": "bold", "label": "Bold", "type": "bool", "group": "Text", "default": true,
+      "beside": "font", "icon": "bold" },
+    { "key": "italic", "label": "Italic", "type": "bool", "group": "Text", "default": false,
+      "beside": "font", "icon": "italic" },
+    { "key": "font_size_px", "label": "Text size", "short": "Size", "type": "number", "group": "Text", "default": 38,
+      "min": 8, "max": 300, "step": 1, "unit": "px", "slider": true },
+    { "key": "text_color", "label": "Text colour", "short": "Colour", "type": "colour", "group": "Text",
+      "default": "#ffffff" },
+    { "key": "emotes", "label": "Show emotes as pictures", "short": "Emotes", "caption": "As pictures",
+      "type": "bool", "group": "Text", "default": true },
+    { "key": "background", "label": "Box colour", "short": "Colour", "type": "colour", "group": "Box",
+      "default": "#14141e" },
+    { "key": "background_opacity", "label": "Box opacity", "short": "Opacity", "type": "number", "group": "Box",
+      "default": 0.85, "min": 0, "max": 1, "step": 0.05, "unit": "percent", "slider": true },
+    { "key": "corner_radius_px", "label": "Corner rounding", "short": "Rounding", "type": "number", "group": "Box",
+      "default": 14, "min": 0, "max": 60, "step": 1, "unit": "px", "slider": true },
+    { "key": "picture", "label": "Picture", "type": "picture", "group": "Picture" },
+    { "key": "picture_height_px", "label": "Picture size", "short": "Size", "type": "number", "group": "Picture",
+      "default": 200, "min": 10, "max": 1080, "step": 5, "unit": "px", "slider": true,
+      "when": { "set": "picture" } },
+    { "key": "picture_placement", "label": "Picture goes", "short": "Placement", "type": "choice", "group": "Picture",
+      "default": "above", "when": { "set": "picture" },
+      "options": [
+        { "value": "above", "label": "Above" },
+        { "value": "below", "label": "Below" },
+        { "value": "left", "label": "Left" },
+        { "value": "right", "label": "Right" }
+      ] },
+    { "key": "sound", "label": "Sound", "type": "sound", "group": "Sound" },
+    { "key": "sound_volume", "label": "Sound volume", "short": "Volume", "type": "number", "group": "Sound",
+      "default": 0.8, "min": 0, "max": 1, "step": 0.05, "unit": "percent", "slider": true,
+      "when": { "set": "sound" } }
+  ],
+  "nodes": [
+    {
+      "id": "alert",
+      "title": "Alert",
+      "category": "effects",
+      "queue": "always",
+      "describe": "message",
+      "changes": ["picture", "picture_height_px", "picture_placement", "position", "animation", "font",
+        "font_size_px", "bold", "italic", "emotes", "text_color", "background", "background_opacity",
+        "corner_radius_px", "sound", "sound_volume"],
+      "inputs": [
+        { "name": "trigger", "label": "Trigger", "type": "event" },
+        { "name": "message", "label": "Message", "type": "text" },
+        { "name": "duration", "label": "Duration (s)", "type": "number" },
+        { "name": "read", "label": "Read aloud", "type": "text", "speak": true }
+      ],
+      "settings": [
+        { "key": "style", "label": "Style", "type": "preset" },
+        { "key": "message", "label": "Message", "type": "text", "default": "{summary}" },
+        { "key": "duration", "label": "Duration (s)", "type": "number", "default": 6, "min": 0.5, "max": 600 },
+        { "key": "read", "label": "Read aloud", "type": "text", "default": "" }
+      ]
+    }
+  ]
+}

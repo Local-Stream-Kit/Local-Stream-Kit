@@ -1,0 +1,17 @@
+# The Copypasta plugin's server code. Build it with `cargo plugin
+# examples/plugins/copypasta` (from the repo), which puts server.wasm
+# here.
+[package]
+name = "copypasta"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wit-bindgen = "0.62"
+
+# Not part of the app's workspace: it's built for WebAssembly on its own.
+[workspace]

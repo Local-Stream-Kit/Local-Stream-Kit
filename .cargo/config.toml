@@ -1,0 +1,32 @@
+# ImageDecoder and VideoFrame (WebCodecs) are unstable APIs in web-sys.
+# Set for every target, not just wasm32: `cargo build` / `test` / `clippy`
+# from the workspace root also compile the overlay crate for the host, and
+# without this flag those APIs don't exist there. It only affects web-sys.
+# A RUSTFLAGS environment variable replaces this setting, so don't set one.
+[build]
+rustflags = ["--cfg=web_sys_unstable_apis"]
+
+# `cargo dist`: build the release overlay and panel, then the server that
+# embeds them. `cargo e2e`: the control panel's end-to-end tests.
+# `cargo streamdeck`: the Stream Deck plugin. `cargo plugin <folder>`: a
+# plugin's server code (Rust → server.wasm). `cargo keygen`: the release
+# signing key, made once. `cargo release <version> [--dry-run]`: a release
+# of the public repo. `cargo feed <exe>`: the release's signed update
+# feed, made by the release workflow. See crates/xtask.
+[alias]
+dist = "run --quiet --package xtask -- dist"
+e2e = "run --quiet --package xtask -- e2e"
+streamdeck = "run --quiet --package xtask -- streamdeck"
+plugin = "run --quiet --package xtask -- plugin"
+keygen = "run --quiet --package xtask -- keygen"
+release = "run --quiet --package xtask -- release"
+feed = "run --quiet --package xtask -- feed"
+
+# Link Windows builds with rust-lld (shipped with Rust). With MSVC's
+# link.exe, crates importing kernel32.dll through `raw-dylib`
+# (windows-link) and the C runtime importing KERNEL32.dll through
+# kernel32.lib can make the linker drop one of the two import entries,
+# depending on the order of objects: the program then crashes before main
+# (STATUS_ACCESS_VIOLATION). lld keeps both.
+[target.x86_64-pc-windows-msvc]
+linker = "rust-lld"

@@ -1,0 +1,7 @@
+[build]
+target = "index.html"
+dist = "dist"
+
+# Also rebuild when the shared protocol crate changes.
+[watch]
+watch = [".", "../protocol"]

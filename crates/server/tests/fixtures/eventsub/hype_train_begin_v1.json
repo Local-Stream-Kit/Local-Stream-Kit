@@ -1,0 +1,61 @@
+{
+    "metadata": {
+        "message_id": "787e306f-8dff-6a5a-f1ac-da6fd7f5af10",
+        "message_type": "notification",
+        "message_timestamp": "2026-10-12T17:15:41.6216872Z",
+        "subscription_type": "channel.hype_train.begin",
+        "subscription_version": "1"
+    },
+    "payload": {
+        "subscription": {
+            "id": "2434fca2-ecea-52d9-45e2-a8433300fee3",
+            "status": "enabled",
+            "type": "channel.hype_train.begin",
+            "version": "1",
+            "condition": {
+                "broadcaster_user_id": "46441857"
+            },
+            "transport": {
+                "method": "websocket",
+                "session_id": "284108d3_08caac3e"
+            },
+            "created_at": "2026-10-12T17:15:31.2748136Z",
+            "cost": 0
+        },
+        "event": {
+            "broadcaster_user_id": "46441857",
+            "broadcaster_user_login": "testBroadcaster",
+            "broadcaster_user_name": "testBroadcaster",
+            "expires_at": "2026-10-12T17:20:41.6069827Z",
+            "goal": 73702,
+            "id": "f6d64ece-a3c2-5264-7de0-3acd7ccb1e51",
+            "last_contribution": {
+                "total": 475,
+                "type": "other",
+                "user_id": "95902248",
+                "user_login": "cli_user2",
+                "user_name": "cli_user2"
+            },
+            "level": 4,
+            "progress": 19,
+            "started_at": "2026-10-12T17:15:41.6069827Z",
+            "top_contributions": [
+                {
+                    "total": 147,
+                    "type": "bits",
+                    "user_id": "83017227",
+                    "user_login": "cli_user1",
+                    "user_name": "cli_user1"
+                },
+                {
+                    "total": 475,
+                    "type": "other",
+                    "user_id": "95902248",
+                    "user_login": "cli_user2",
+                    "user_name": "cli_user2"
+                }
+            ],
+            "total": 19
+        }
+    }
+}

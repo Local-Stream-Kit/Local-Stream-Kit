@@ -1,0 +1,27 @@
+{
+  "id": "bits-to-money",
+  "name": "Bits to money",
+  "version": "0.1.0",
+  "api": 1,
+  "author": "Local Stream Kit",
+  "description": "A value node: what a cheer's bits are worth, at the rate you set (by default $1.00 for 100 bits).",
+  "nodes": [
+    {
+      "id": "money",
+      "title": "Bits to money",
+      "category": "values",
+      "inputs": [
+        { "name": "bits", "label": "Bits", "type": "number" }
+      ],
+      "outputs": [
+        { "name": "money", "label": "Money", "type": "number" },
+        { "name": "text", "label": "As text", "type": "text" }
+      ],
+      "settings": [
+        { "key": "bits", "label": "Bits", "type": "number", "default": 100, "min": 0 },
+        { "key": "rate", "label": "Per 100 bits", "type": "number", "default": 1, "min": 0 },
+        { "key": "currency", "label": "Currency", "type": "text", "default": "$" }
+      ]
+    }
+  ]
+}

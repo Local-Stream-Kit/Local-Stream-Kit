@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<title>Local Stream Kit</title>
+		<style>
+			:root { color-scheme: dark; }
+			body { margin: 0; padding: 8px 12px 12px 0; background: #2d2d2d; color: #d8d8d8; font: 9pt "Segoe UI", -apple-system, "Helvetica Neue", sans-serif; }
+			.section { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+			.row { display: flex; align-items: center; gap: 10px; min-height: 26px; }
+			.label { flex: 0 0 96px; text-align: right; color: #969696; }
+			.value { flex: 1; min-width: 0; }
+			select, input { box-sizing: border-box; width: 100%; height: 26px; padding: 0 6px; border: 1px solid transparent; border-radius: 3px; background: #3d3d3d; color: #d8d8d8; font: inherit; }
+			select:focus, input:focus { outline: none; border-color: #6c5ce7; }
+			option:disabled { color: #8a8a8a; }
+			.status::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; background: #888; vertical-align: 1px; }
+			.status.connected::before { background: #3ecf80; }
+			.status.connecting::before { background: #e0a33a; }
+			.status.wrong-key::before, .status.unreachable::before, .status.too-new::before { background: #e5605a; }
+			.hint, .problem { color: #969696; line-height: 1.4; }
+			.problem { color: #f0a9a5; }
+			hr { border: 0; border-top: 1px solid #3d3d3d; margin: 4px 0 10px 106px; }
+		</style>
+	</head>
+	<body>
+		<div class="section">
+			<div class="row"><span class="label">Local Stream Kit</span><span id="status" class="value status"></span></div>
+			<div class="row"><span class="label"></span><span id="problem" class="value problem" hidden></span></div>
+			<div class="row">
+				<label class="label" for="address">Address</label>
+				<input id="address" class="value" type="text" spellcheck="false" autocomplete="off" />
+			</div>
+			<div class="row" id="address-hint">
+				<span class="label"></span>
+				<span class="value hint">In Local Stream Kit: Status → Control API → copy the Stream Deck plugin line. Every key shares it.</span>
+			</div>
+		</div>
+		<hr />
+		<div class="section" id="fields"></div>
+		<script src="settings.js"></script>
+	</body>
+</html>

@@ -1,0 +1,798 @@
+/* Local Stream Kit control panel — dark, OBS-like, one blue accent. */
+
+:root {
+  --ground: #1f2026;
+  --ground-deep: #1a1b20;
+  --panel: #2a2b32;
+  --panel-raised: #33343c;
+  --header: #26272e;
+  --sidebar: #22232a;
+  --field: #17181d;
+  --border: #383943;
+  --border-strong: #44454f;
+  --text: #e6e6ea;
+  --text-strong: #ffffff;
+  --muted: #a9aab3;
+  --faint: #8b8c96;
+  --accent: #3d68d8;
+  --accent-line: #5b84f0;
+  --link: #8fb0ff;
+  --ok: #4cc38a;
+  --warn: #e8b04a;
+  --error: #ff6b6b;
+  --error-text: #ff9a9a;
+  --events: #5a3d82;
+  --flow: #474c5a;
+  --values: #2f5384;
+  --effects: #2b6b4c;
+  --socket-event: #ededf1;
+  --socket-number: #6aa9ff;
+  --socket-text: #f2b35b;
+  --socket-emotes: #e08ad8;
+  --socket-speech: #5fd4a8;
+  --sans: "IBM Plex Sans", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, monospace;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { background: var(--ground); color: var(--text); font-family: var(--sans); font-size: 13px; }
+a { color: var(--link); text-decoration: none; }
+a:hover { color: #b8ccff; }
+button, input, select, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; }
+h1 { margin: 0; font-size: 15px; font-weight: 600; }
+h2 { margin: 0; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.mono { font-family: var(--mono); }
+.muted { color: var(--muted); }
+.small { font-size: 12px; }
+.big { font-size: 16px; }
+.icon { flex: none; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+#plugins-page.dropping { outline: 2px dashed var(--accent-line); outline-offset: -2px; border-radius: 8px; }
+.loading { display: grid; place-items: center; height: 100%; color: var(--muted); }
+
+input[type="text"], input[type="number"], input[type="search"], input[type="password"], select, textarea {
+  height: 32px; padding: 0 9px; border-radius: 6px; border: 1px solid var(--border-strong);
+  background: var(--field); color: #ededf1; min-width: 0;
+}
+textarea { height: auto; padding: 6px 8px; resize: vertical; }
+input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-visible, a:focus-visible {
+  outline: 2px solid var(--accent-line); outline-offset: 1px;
+}
+input[type="range"] { width: 100%; margin: 0; accent-color: var(--accent-line); }
+input[type="checkbox"] { accent-color: var(--accent-line); }
+
+.switch {
+  appearance: none; -webkit-appearance: none; width: 34px; height: 20px; border-radius: 10px;
+  background: #4a4b55; position: relative; margin: 0; cursor: pointer; flex: none;
+}
+.switch::after {
+  content: ""; position: absolute; top: 3px; left: 3px; width: 14px; height: 14px;
+  border-radius: 50%; background: #c9cad2; transition: left 0.12s;
+}
+.switch:checked { background: var(--accent); }
+.switch:checked::after { left: 17px; background: #fff; }
+
+.button {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 32px;
+  padding: 0 12px; border-radius: 6px; border: 0; background: #3a3b45; color: #ededf1; font-weight: 500;
+  white-space: nowrap;
+}
+.button:hover { background: #44454f; color: #fff; }
+.button.primary { background: var(--accent); color: #fff; }
+.button.primary:hover { background: #4874e6; }
+.button.ghost { background: transparent; border: 1px solid var(--border-strong); color: #c9cad2; }
+.button.ghost:hover { background: #2f3038; }
+.button.small { height: 28px; padding: 0 10px; font-size: 12px; }
+/* Without a frame, as text with an icon (a preview's Play). */
+.button.flat { background: transparent; color: #c9cad2; padding: 0 9px; }
+.button.flat:hover { background: #33343c; color: #fff; }
+.button:disabled { opacity: 0.45; cursor: default; }
+.icon-button {
+  display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px;
+  border-radius: 6px; border: 1px solid var(--border-strong); background: transparent; color: #c9cad2;
+}
+.icon-button:hover { background: #2f3038; }
+.icon-button:disabled { opacity: 0.4; cursor: default; }
+.icon-button.flat { border: 0; color: var(--muted); }
+.icon-button.flat:hover, .icon-button.flat[aria-expanded="true"] { background: #33343c; color: var(--text); }
+.button-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.button-row.secret-field { flex-wrap: nowrap; }
+.secret-field input { flex: 1; min-width: 0; }
+
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background: #6b6c76; vertical-align: 1px; }
+.dot.ok { background: var(--ok); }
+.dot.warn { background: var(--warn); }
+.dot.error { background: var(--error); }
+.dot.accent { background: var(--accent-line); }
+
+/* Dock layout */
+.dock { display: flex; flex-direction: column; min-height: 100%; }
+.dock-header { position: sticky; top: 0; z-index: 5; display: flex; flex-direction: column; gap: 8px; padding: 12px 14px 0; background: var(--header); border-bottom: 1px solid var(--border); }
+.dock-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.app-name { font-weight: 600; font-size: 14px; }
+.dock-status { display: flex; gap: 10px; flex-wrap: wrap; }
+.dots { display: flex; gap: 10px; color: var(--muted); font-size: 12px; }
+.dots:hover { color: var(--text); }
+.dot-label { display: inline-flex; align-items: center; }
+.tabs { display: flex; gap: 2px; }
+.tab { padding: 8px 12px; color: var(--muted); border-bottom: 2px solid transparent; }
+.tab:hover { color: var(--text); }
+.tab.current { color: #fff; border-bottom-color: var(--accent-line); font-weight: 500; }
+.dock-main { flex: 1; width: 100%; max-width: 760px; margin: 0 auto; }
+
+.banner { padding: 8px 14px; font-size: 12px; border-bottom: 1px solid var(--border); }
+.banner.warn { background: #3a3220; color: #f0d08a; }
+.banner.error { background: #4a2327; color: #ffb3b3; }
+
+.page { display: flex; flex-direction: column; gap: 10px; padding: 14px 10px; }
+.page-title { display: flex; align-items: center; gap: 8px; padding: 0 4px; }
+.back { display: flex; color: var(--muted); }
+.field { display: flex; flex-direction: column; gap: 5px; padding: 0 4px; border: 0; margin: 0; }
+.field label, .field legend { color: var(--muted); font-size: 12px; padding: 0; }
+.check-field { display: flex; align-items: center; gap: 8px; padding: 0 4px; }
+.check-field.inline { display: inline-flex; margin-right: 12px; }
+
+.panel-box { display: flex; flex-direction: column; gap: 10px; padding: 12px; border-radius: 8px; background: var(--panel); border: 1px solid var(--border); }
+.panel-box.highlight { border-color: var(--accent-line); }
+
+/* Text styles (Plugins): a style a line, open in the plugin boxes' rows
+   under its sample. */
+.text-style-row { display: flex; flex-direction: column; gap: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+.text-style-fold { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 28px; }
+.text-style-title { min-width: 0; font-weight: 600; overflow-wrap: anywhere; }
+.text-style-title .dot { margin: 0 0 0 2px; }
+.text-style-preview { flex: none; max-width: 60%; padding: 2px 10px; border-radius: 6px; background: #14141e; color: #fff; font-size: 14px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.text-style-body { display: flex; flex-direction: column; gap: 10px; }
+.text-style-sample {
+  padding: 12px 16px; border: 1px solid var(--border); border-radius: 8px; color: #fff;
+  background: repeating-conic-gradient(#26272d 0% 25%, #222329 0% 50%) 50% / 20px 20px;
+  font-size: 22px; font-weight: 700; line-height: 1.3; overflow-wrap: anywhere;
+}
+/* Overlays (Status) */
+.overlay-row { display: flex; flex-direction: column; gap: 6px; }
+.overlay-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.overlay-name { display: flex; align-items: center; gap: 6px; min-width: 0; font-weight: 500; overflow-wrap: anywhere; }
+.overlay-state { flex: none; }
+.overlay-summary { padding-left: 22px; overflow-wrap: anywhere; }
+.overlay-row.unlisted .muted { padding-left: 0; }
+/* An overlay's link with Copy, and Drag into OBS (under it when there's no room). */
+.overlay-link { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding-left: 22px; min-width: 0; }
+.obs-drag { cursor: grab; text-decoration: none; }
+.overlay-body { display: flex; flex-direction: column; gap: 8px; padding: 4px 0 0 22px; }
+.overlay-plugins { display: flex; flex-direction: column; gap: 4px; border: none; margin: 0; padding: 0; }
+.box-head { display: flex; align-items: center; gap: 10px; }
+.box-title { font-weight: 500; font-size: 14px; flex: 1; }
+.box-fold { display: flex; align-items: center; gap: 6px; padding: 2px 0; border: none; background: none; color: inherit; font-family: inherit; text-align: left; cursor: pointer; }
+.box-fold .icon { color: var(--muted); transition: transform 0.15s; }
+.box-fold.open .icon { transform: rotate(90deg); }
+/* A plugin's status (its server code's few words), beside its name. */
+.plugin-status { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; max-width: 45%; }
+.box-plain { padding-left: 22px; } /* in line with the folding titles, after their chevron */
+.box-body { display: flex; flex-direction: column; gap: 10px; }
+/* A state in a row (its dot and words), and one with a button at the end. */
+.state-line { display: flex; align-items: center; gap: 8px; min-height: 32px; min-width: 0; }
+.state-line > .dot { flex: none; margin-right: 0; }
+.state-spread { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
+.login-control { display: flex; flex-direction: column; align-items: stretch; gap: 6px; min-width: 0; }
+/* A read-only field with Copy: a link, a URL, the key, a code. */
+.copy-field { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.key-line > .copy-field, .overlay-link > .copy-field { flex: 1 1 200px; }
+.copy-field input { flex: 1; min-width: 0; font-size: 12px; }
+.copy-field input.big { height: 40px; font-size: 18px; letter-spacing: 0.1em; }
+/* The control API's key: Show, Copy and New key beside it, or under it in the dock. */
+.key-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 4px; min-width: 0; }
+.key-buttons { display: flex; align-items: center; gap: 4px; flex: none; }
+.danger-note { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--error-text); }
+.danger-note .icon { flex: none; width: 14px; height: 14px; color: var(--error); }
+/* A group that folds under its title ("Make a URL"). */
+.group-fold { align-self: flex-start; font-size: 12.5px; font-weight: 600; color: var(--text); }
+.emote-count { font-size: 12.5px; color: #d4d5db; }
+.emote-line { padding-left: 23px; }
+.log-lines { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; max-height: 260px; overflow-y: auto; }
+.log-line { display: grid; grid-template-columns: auto auto 1fr; gap: 6px; align-items: baseline; }
+.log-line > span:last-child, .log-folder { overflow-wrap: anywhere; }
+.log-line.error > span:last-child { color: var(--error-text); }
+.status-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.notice { display: flex; gap: 8px; align-items: flex-start; padding: 10px 12px; border-radius: 8px; }
+.notice.warn { background: #3a3220; border: 1px solid #5a4a26; color: #f0d08a; }
+/* A notice with a button (a plugin's Allow): the words, the button on the
+   right, both on the button's first line; under them when there's no room. */
+.notice.with-action { flex-wrap: wrap; }
+.notice.with-action > .icon { flex: none; margin-top: 6px; }
+.notice.with-action > .notice-text { flex: 1 1 180px; min-width: 0; padding-top: 5px; }
+.notice.with-action > .button { margin-left: auto; }
+.notice.warn .button { background: #5a4a26; color: #f6e2a8; }
+.notice.warn .button:hover { background: #6b5830; color: #fff3cf; }
+/* A newer version (Status, on top): the words and What's new, Download on
+   the right; how the download goes under them. */
+.notice.info { background: #263049; border: 1px solid #34487a; color: var(--text); }
+.notice.info > .icon { color: var(--link); }
+.update-notice .notice-text { display: flex; flex-direction: column; gap: 4px; }
+.update-notice .progress { margin-top: 4px; }
+.update-error { overflow-wrap: anywhere; }
+/* A link opened in the browser (the release, the licence, support). */
+.app-link { display: inline-flex; align-items: center; gap: 4px; }
+.app-link .icon { width: 12px; height: 12px; }
+/* About's rows: a line, and a small one under it. */
+.about-lines { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.about-lines > .state-line { min-height: 0; }
+.plugin-note { margin-top: 8px; }
+.plugin-note:not(.warn) { background: #22232a; border: 1px solid var(--border); }
+.note-lines { display: flex; flex-direction: column; gap: 4px; min-width: 0; overflow-wrap: anywhere; }
+.warn-text { color: #f0d08a; margin: 0; }
+.panel-box p { margin: 0; line-height: 1.5; }
+
+/* Cards: one box, a card a row between lines; its name opens it, the
+   switch turns it on or off; "+ New card" last, where new ones go. */
+.panel-box.card-box { gap: 0; padding: 2px 8px; }
+.card-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.card-item { position: relative; display: flex; align-items: flex-start; gap: 10px; padding: 10px 6px 10px 4px; border-top: 1px solid #34353e; transition: transform 150ms ease; }
+.card-item:first-child { border-top-color: transparent; }
+.card-item:hover { background: #2f3038; }
+.card-item.dragging { transition: none; z-index: 2; border-radius: 6px; border-top-color: transparent; background: #33343c; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45); }
+.card-list.sorting { user-select: none; cursor: grabbing; }
+.card-list.sorting .card-item:not(.dragging) { background: none; }
+.drag-handle { display: flex; flex: none; margin: 0 -2px; padding: 2px; border: 0; border-radius: 4px; background: none; color: var(--faint); cursor: grab; touch-action: none; }
+.drag-handle .icon { stroke-width: 2.6; }
+.drag-handle:hover, .drag-handle:focus-visible, .card-item.dragging .drag-handle { color: var(--text); background: rgba(255, 255, 255, 0.06); }
+.card-list.sorting .drag-handle { cursor: grabbing; }
+.card-open { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; color: inherit; text-decoration: none; }
+.card-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.card-name { font-weight: 500; font-size: 14px; line-height: 20px; color: #ededf1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card-open:hover .card-name { text-decoration: underline; text-decoration-color: #6f707a; text-underline-offset: 3px; }
+.card-item.off .card-name { color: var(--muted); }
+.card-summary { color: var(--faint); font-size: 12px; }
+.card-item.off .card-summary { color: #6f707a; }
+.card-problem { display: flex; align-items: center; gap: 6px; color: var(--error-text); font-size: 12px; }
+.card-problem .icon { flex: none; width: 13px; height: 13px; }
+.card-chevron { display: inline-flex; flex: none; color: #6f707a; }
+.card-item:hover .card-chevron { color: var(--text); }
+.card-new { display: flex; align-items: center; gap: 10px; padding: 10px 6px 10px 4px; border-top: 1px solid #34353e; color: var(--link); font-size: 14px; font-weight: 500; line-height: 20px; text-decoration: none; }
+.card-list:empty + .card-new { border-top-color: transparent; }
+.card-new:hover { background: #2f3038; }
+/* The + where the switches are. */
+.card-new-plus { display: inline-flex; justify-content: center; flex: none; width: 34px; margin-left: 26px; }
+.card-empty { margin: 0; padding: 12px 6px 10px 4px; border-bottom: 1px solid #34353e; color: var(--muted); font-size: 12.5px; line-height: 1.5; }
+
+/* Activity: the queue and the history */
+.button.danger { background: #5a2f36; color: #ffd0d0; }
+.button.danger:hover { background: #6c3640; }
+/* A box's settings, opened from its head: the button stays pressed. */
+.button.pressed { background: #33343c; border: 1px solid var(--accent-line); color: #fff; }
+.queue-state { display: inline-flex; align-items: center; color: var(--muted); font-size: 12px; }
+.queue-section { display: flex; flex-direction: column; gap: 8px; }
+.queue-heading { color: var(--text); font-size: 12.5px; font-weight: 600; }
+.queue-section p { margin: 0; }
+/* What's on stage stands out; what waits is a list of rows. */
+.queue-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.queue-item { display: flex; align-items: flex-start; gap: 8px; padding: 8px 2px; border-top: 1px solid #34353e; }
+.queue-list.now .queue-item { padding: 8px 10px; border: 0; border-radius: 6px; background: #263049; box-shadow: inset 3px 0 0 var(--accent-line); }
+.queue-text { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.queue-main { color: var(--text); overflow-wrap: anywhere; }
+.queue-from { color: var(--faint); font-size: 12px; overflow-wrap: anywhere; }
+.queue-skip-one { flex: none; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: #6f707a; font-size: 15px; line-height: 1; }
+.queue-skip-one:hover { color: var(--text); background: #3a3b45; }
+.queue-lists { display: flex; flex-direction: column; gap: 12px; }
+.queue-item.gone { opacity: 0.45; }
+/* Its event prepared again after the cards changed, and it changed. */
+.queue-item.changed { animation: changed 1.6s ease-out; }
+@keyframes changed { from { background: #34406a; } }
+.queue-note { background: #22232a; border: 1px solid var(--border); align-items: center; }
+.queue-note .note-lines { flex: 1; }
+/* What an item is, in its plugin's colour (the built-in ones). */
+.kind.kind-alert { color: #9fe2c0; }
+.kind.kind-speech { color: #7fd6c8; }
+.kind.kind-sound { color: #cdb8f5; }
+.kind.kind-plugin { color: #f0cf9a; }
+.tag { display: inline-block; margin-right: 6px; padding: 0 5px; border-radius: 3px; background: #3a3b45; color: #d8d8e0; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+.filters { display: flex; flex-wrap: wrap; gap: 4px; }
+.filter { padding: 3px 10px; border-radius: 12px; border: 1px solid var(--border-strong); background: transparent; color: var(--muted); font-size: 12px; }
+.filter:hover { color: var(--text); }
+.filter.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.history .box-head .button { margin-left: 4px; }
+.history-new { color: var(--error); font-size: 12px; font-weight: 600; }
+/* The History's Filter: the boxes' rows, between two lines. */
+.history-settings { padding: 12px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.history-settings-heading { padding-top: 4px; color: var(--text); font-size: 12.5px; font-weight: 600; }
+.history-kind input[type="checkbox"] { flex: none; margin: 0; }
+.history-kind.off .number-caption, .history-kind.off input.num { opacity: 0.45; }
+.history-kind .min-word { color: var(--faint); }
+.history-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.history-item { position: relative; border-top: 1px solid #34353e; }
+.history-item:first-child { border-top: 0; }
+/* A grid, so the message lines up under the summary, not the time. */
+.history-item summary { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: baseline; gap: 2px 8px; padding: 8px 2px; color: var(--text); font-size: 13px; font-weight: 400; text-transform: none; letter-spacing: 0; cursor: pointer; }
+.history-item summary::marker { color: var(--faint); }
+.history-time { color: var(--faint); font-size: 12px; }
+/* Closed, every entry is one line: the summary first, then as much of
+   the message as fits, both cut with an ellipsis. */
+.history-item summary.with-message { grid-template-columns: auto minmax(0, max-content) minmax(40px, 1fr) auto; }
+.history-summary { min-width: 0; overflow-wrap: anywhere; }
+.history-item details:not([open]) .history-summary { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.history-outcome { grid-column: -2; grid-row: 1; align-items: center; color: var(--faint); font-size: 12px; }
+/* Under the summary's words: the time's unseen copy keeps its column. */
+.history-body { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 8px; padding: 0 2px 10px; }
+.history-gutter { visibility: hidden; }
+.history-body-main { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; font-size: 12.5px; }
+.history-body p { margin: 0; }
+.history-body .button-row { padding-top: 4px; }
+.history-cards a { color: var(--link); text-decoration: none; }
+.history-cards a:hover { text-decoration: underline; }
+/* A link a viewer wrote: opens in the PC's browser. */
+.viewer-link { color: var(--link); overflow-wrap: anywhere; }
+.viewer-link:hover { color: #b8ccff; text-decoration: underline; }
+/* A quiet quote, so the entries' own lines still lead. */
+.history-message { grid-column: 2 / -1; padding-left: 8px; border-left: 1px solid var(--border-strong); color: var(--muted); font-size: 12.5px; line-height: 1.45; overflow-wrap: anywhere; }
+.history-item summary .history-message { grid-column: 3; grid-row: 1; min-width: 0; line-height: inherit; }
+.history-item details[open] summary .history-message { grid-column: 2 / -1; grid-row: 2; line-height: 1.45; }
+/* Open, an alert that showed the message shows it; the quote steps aside. */
+.history-item.message-in-items details[open] summary .history-message { display: none; }
+/* One line while the entry is closed; all of it when it's open. */
+.history-message-text { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.history-item details[open] .history-message-text { white-space: normal; }
+.history-emote { height: 1.6em; vertical-align: middle; }
+/* Closed, an emote doesn't make its line taller than the others. */
+.history-item details:not([open]) .history-emote, .queue-main .history-emote { height: 1.3em; margin: -0.2em 0; }
+.history-items { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; color: #d4d5db; }
+/* Stands out a little from the other entries. */
+.tag.replay-tag { display: inline-flex; align-items: center; gap: 3px; background: #263049; color: var(--link); vertical-align: 1px; }
+.tag.replay-tag .icon { width: 10px; height: 10px; }
+/* The seen marker: a red line under the new events, All seen at its end,
+   and each new row's ✓ while the pointer is on it (the row makes room). */
+.seen-line { display: flex; align-items: center; gap: 8px; padding: 6px 0; }
+.seen-rule { flex: 1; height: 1px; background: #c94a4a; }
+.seen-words { flex: none; color: var(--error); font-size: 11.5px; font-weight: 600; }
+.seen-all { display: inline-flex; align-items: center; gap: 4px; flex: none; height: 22px; padding: 0 8px; border: 0; border-radius: 4px; background: #c94a4a; color: #fff; font-size: 11px; font-weight: 600; }
+.seen-all:hover { background: #d65656; }
+.seen-all .icon { width: 12px; height: 12px; }
+.history-item.seeable:hover summary, .history-item.seeable:focus-within summary { padding-right: 36px; }
+.history-item.seeable:hover { background: #2f3038; }
+.seen-here { position: absolute; top: 4px; right: 2px; display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; padding: 0; border: 1px solid var(--border-strong); border-radius: 6px; background: #33343c; color: var(--text); opacity: 0; }
+.seen-here .icon { width: 13px; height: 13px; }
+.history-item:hover .seen-here, .seen-here:focus-visible { opacity: 1; }
+.seen-here:hover { border-color: var(--accent-line); }
+
+/* New card: Empty card, then a box per group, its title larger than the
+   presets' names; a preset a row between lines, as on the Cards tab. */
+.panel-box.preset-box { gap: 0; padding: 12px 8px 2px; }
+.panel-box.preset-box.empty { padding: 2px 8px; }
+.preset-group { padding: 0 6px 10px; color: #fff; font-size: 15px; font-weight: 600; text-transform: none; letter-spacing: normal; }
+.preset-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.preset { width: 100%; display: flex; align-items: center; gap: 10px; padding: 10px 6px; border: 0; border-top: 1px solid #34353e; border-radius: 0; background: transparent; color: inherit; text-align: left; }
+.preset-box.empty .preset { border-top-color: transparent; }
+.preset:hover { background: #2f3038; }
+.preset:hover .card-chevron { color: var(--text); }
+.preset-plus { display: inline-flex; flex: none; color: var(--link); }
+.preset-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.preset-title { font-weight: 500; font-size: 14px; line-height: 20px; color: #ededf1; }
+.preset-description { color: var(--muted); font-size: 12.5px; }
+
+details summary { color: var(--muted); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; padding: 4px 0; }
+
+/* A plugin's own settings (and a text style's): a row each, its label in a
+   column of their own and its field beside it (narrower in a dock), in
+   groups under headings. */
+:root { --label-width: 112px; }
+@media (max-width: 520px) { :root { --label-width: 92px; } }
+.plugin-settings { display: flex; flex-direction: column; gap: 14px; }
+.setting-rows { display: flex; flex-direction: column; gap: 10px; }
+.setting-row { display: grid; grid-template-columns: var(--label-width) minmax(0, 440px); align-items: center; column-gap: 8px; }
+.setting-label { color: var(--muted); font-size: 12.5px; overflow-wrap: anywhere; }
+.setting-row.tall > .setting-label { align-self: start; }
+/* A list's label on its first line, and a field's with a note under it. */
+.setting-row.list > .setting-label, .setting-row.noted > .setting-label { padding-top: 7px; }
+.setting-control { display: flex; flex-direction: column; align-items: stretch; gap: 6px; min-width: 0; }
+.setting-control > .check-field { min-height: 32px; padding: 0; }
+/* The browser's own margin would put a tick box 4 px in from the others. */
+.setting-control > .check-field input[type="checkbox"] { margin: 0; }
+/* Words that may take two lines (in the dock): the row's label and the
+   tick box stay on the first. */
+.setting-row.wraps > .setting-label { align-self: start; padding-top: 7px; }
+.setting-control > .check-field.wraps { align-items: flex-start; padding: 7px 0; }
+.setting-control > .check-field.wraps input[type="checkbox"] { flex: none; margin-top: 2px; }
+/* Small buttons beside a picker, unframed as the preset row's. */
+.setting-control .icon-button.small-icon { border: 0; color: var(--muted); }
+.setting-control .icon-button.small-icon:hover { background: #33343c; color: var(--text); }
+.setting-control > .swatch { align-self: flex-start; }
+.setting-control > select.choice { max-width: 240px; }
+.setting-control > .plugin-note { margin-top: 0; }
+.setting-group { display: flex; flex-direction: column; gap: 10px; padding-top: 12px; border-top: 1px solid var(--border); }
+.setting-group h3 { margin: 0; font-size: 12.5px; font-weight: 600; color: var(--text); }
+.slider-row { display: flex; align-items: center; gap: 10px; min-height: 32px; }
+/* A number without a slider: a short field, its words after it. */
+.number-row { display: flex; align-items: center; gap: 8px; min-height: 32px; }
+.number-row input.num { flex: none; width: 72px; }
+.number-caption { color: #c9cad2; }
+/* A list setting: a line each, × to take one out, Add under them. */
+.list-rows { display: flex; flex-direction: column; gap: 4px; }
+.list-row { display: flex; align-items: center; gap: 6px; }
+.list-row input { flex: 1; min-width: 0; }
+/* A file setting: its looks' picker with ✎ and ?, and under it, when
+   open, the text (the whole width) and the help. */
+.look-setting { display: flex; flex-direction: column; gap: 10px; }
+.look-control { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.look-control select, .look-control input[type="text"] { flex: 1; min-width: 0; }
+.look-control .icon-button.flat[aria-expanded="true"] { background: #33343c; color: var(--text); }
+.look-editor { display: flex; flex-direction: column; gap: 8px; }
+.slider-row input[type="range"] { flex: 1; min-width: 0; }
+.slider-value { flex: none; width: 60px; text-align: right; white-space: nowrap; font-size: 12px; color: #c9cad2; }
+/* A colour picker that is all colour, up to its edge. */
+input[type="color"].swatch { width: 32px; height: 32px; margin: 0; padding: 0; border-radius: 6px; border: 1px solid var(--border-strong); background: var(--field); cursor: pointer; overflow: hidden; }
+input[type="color"].swatch::-webkit-color-swatch-wrapper { padding: 0; }
+input[type="color"].swatch::-webkit-color-swatch { border: 0; border-radius: 5px; }
+/* A choice with few options: a row of buttons, the picked one raised. */
+.choice-buttons { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); height: 32px; padding: 2px; gap: 2px; border-radius: 6px; border: 1px solid var(--border-strong); background: var(--field); }
+.choice-buttons button { min-width: 0; padding: 0 6px; border: 0; border-radius: 4px; background: transparent; color: var(--muted); font-size: 12px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.choice-buttons button:hover { color: var(--text); }
+.choice-buttons button.on { background: #3a3b45; color: #fff; }
+/* A field with tick boxes beside it as small buttons (Bold, Italic). */
+.with-toggles { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.with-toggles > :first-child { flex: 1; min-width: 0; }
+.toggle { flex: none; width: 32px; height: 32px; padding: 0; border: 1px solid var(--border-strong); border-radius: 6px; background: transparent; color: #c9cad2; font-size: 14px; }
+.toggle.text { width: auto; padding: 0 10px; font-size: 12px; }
+.toggle:hover { background: #2f3038; }
+.toggle.on { border-color: var(--accent-line); background: #2c3a5e; color: #fff; }
+
+.field-label { color: var(--muted); font-size: 12.5px; }
+/* A plugin's position setting: a 3 × 3 grid. */
+/* A position (views/position.rs, 2026-10-15): a small 16:9 screen with the
+   thing as a box and the nine dots of the old grid, the numbers beside it
+   (under it in the dock and a node's popover). Places are in % of the
+   screen, as position.rs works them out. */
+.position-pick { display: flex; align-items: flex-start; gap: 14px; min-width: 0; }
+.position-pick.stacked { flex-direction: column; gap: 8px; }
+.position-screen {
+  position: relative; flex: none; width: 240px; max-width: 100%; aspect-ratio: 16 / 9;
+  border-radius: 6px; border: 1px solid var(--border-strong); background: #121317;
+  overflow: hidden; cursor: pointer; touch-action: none; user-select: none;
+}
+.position-pick.stacked .position-screen { width: 236px; }
+.position-screen:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 1px; }
+.position-dot { position: absolute; z-index: 2; width: 5px; height: 5px; margin: -2.5px 0 0 -2.5px; border-radius: 50%; background: #5d5e69; pointer-events: none; }
+.position-dot.on { width: 7px; height: 7px; margin: -3.5px 0 0 -3.5px; background: var(--accent-line); }
+.position-box {
+  position: absolute; z-index: 1; width: 30%; height: 24%; box-sizing: border-box;
+  border-radius: 4px; border: 1.5px solid var(--accent-line); background: rgba(91, 132, 240, 0.22); cursor: grab;
+}
+.position-screen.dragging, .position-screen.dragging .position-box { cursor: grabbing; }
+.position-anchor { position: absolute; z-index: 3; width: 7px; height: 7px; margin: -3.5px 0 0 -3.5px; box-sizing: border-box; border-radius: 50%; background: #fff; border: 1.5px solid var(--accent-line); pointer-events: none; }
+/* Anywhere (random): somewhere else each time. */
+.position-ghost { position: absolute; width: 30%; height: 24%; box-sizing: border-box; border-radius: 4px; border: 1.5px dashed #6f7080; }
+.position-screen.random::after { content: ""; position: absolute; inset: 0; z-index: 4; background: rgba(18, 19, 23, 0.5); }
+.position-side { display: flex; flex-direction: column; gap: 10px; padding-top: 2px; min-width: 0; }
+.position-numbers { display: grid; grid-template-columns: auto auto; justify-content: start; align-items: center; gap: 8px; margin: 0; padding: 0; border: 0; min-width: 0; }
+.position-numbers:disabled { opacity: 0.45; }
+.position-numbers label { color: var(--muted); font-size: 12.5px; white-space: nowrap; }
+.position-number { display: flex; align-items: center; gap: 5px; color: var(--faint); font-size: 12px; }
+.position-number input.num { width: 52px; font-family: var(--mono); }
+.position-random { display: flex; align-items: center; gap: 8px; color: #c9cad2; font-size: 12.5px; }
+.position-random input { margin: 0; }
+@media (max-width: 520px) {
+  .position-pick { flex-direction: column; gap: 8px; }
+  .position-screen { width: 100%; }
+}
+/* In a node: a field like the dropdowns that opens the control, over
+   everything. */
+.position-field {
+  display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0; height: 26px; padding: 0 22px 0 6px;
+  border-radius: 5px; border: 1px solid var(--border-strong); color: #ededf1; font: inherit; text-align: left; cursor: pointer;
+  background: var(--field) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='11' height='11' viewBox='0 0 16 16' fill='none' stroke='%23a9aab3' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 6l4 4 4-4'/%3E%3C/svg%3E") no-repeat right 6px center;
+}
+.position-field[aria-expanded="true"] { border-color: var(--accent-line); }
+.position-field-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.position-mini { position: relative; flex: none; width: 22px; height: 13px; box-sizing: border-box; border-radius: 2px; border: 1px solid #6f7080; }
+.position-mini > span { position: absolute; width: 30%; height: 24%; border-radius: 1px; background: var(--accent-line); }
+.position-mini.random > span { display: none; }
+.position-backdrop { position: fixed; inset: 0; z-index: 100; }
+.position-popover {
+  position: fixed; width: 262px; padding: 12px; box-sizing: border-box; border-radius: 8px;
+  background: #2b2c33; border: 1px solid #55565f; box-shadow: 0 10px 24px rgba(0, 0, 0, 0.5);
+  font-size: 12.5px; color: var(--text);
+}
+.picture-pick { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.picture-pick select { flex: 1; min-width: 0; }
+.upload { position: relative; cursor: pointer; flex: none; }
+.upload:focus-within { outline: 2px solid var(--accent-line); outline-offset: 2px; }
+.upload.failed { color: var(--error-text); border-color: var(--error); }
+.error { color: var(--error-text); }
+.sound-pick { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; }
+.sound-pick select { flex: 1; min-width: 0; }
+.icon-button.small-icon { width: 26px; height: 26px; flex: none; font-size: 10px; }
+/* The Sounds box's files: ▶, the label, the bin; a label's file name
+   under it. */
+.sound-list { display: flex; flex-direction: column; gap: 6px; }
+.sound-list > p { margin: 0; line-height: 32px; }
+.sound-item { display: flex; flex-direction: column; min-width: 0; }
+.sound-line { display: flex; align-items: center; gap: 5px; min-width: 0; }
+.sound-line input { flex: 1; min-width: 0; }
+.sound-line .button.danger { flex: none; white-space: nowrap; }
+.sound-file { padding: 2px 0 0 37px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 12px; }
+.sound-upload { padding-top: 2px; }
+.speech-install { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.progress { width: 100%; height: 8px; border-radius: 4px; background: var(--field); overflow: hidden; }
+.progress-bar { height: 100%; background: var(--accent-line); transition: width 0.3s; }
+.say-row input { flex: 1 1 0; }
+.speech-try { display: flex; align-items: center; gap: 6px; min-width: 0; }
+/* Something being done: the Try text being read, after "Voice". */
+.spinner {
+  display: inline-block; width: 12px; height: 12px; margin-left: 6px; vertical-align: -2px;
+  border: 2px solid var(--border-strong); border-top-color: var(--accent-line); border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2.4s; } }
+.speech-try input { flex: 1; min-width: 0; }
+.speech-try .button { flex: none; height: 32px; }
+
+/* The Test page: a box's title as a heading; an event's row (its number
+   and words, Send at the end, under them when there's no room); what was
+   sent. */
+.box-head h2.box-title { color: var(--text); font-size: 14px; font-weight: 500; text-transform: none; letter-spacing: normal; }
+.test-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; min-height: 32px; min-width: 0; }
+.test-line input.num { flex: none; width: 72px; }
+.test-line > .button { margin-left: auto; }
+.sent-lines { display: flex; flex-direction: column; gap: 6px; }
+.sent-line { display: flex; align-items: baseline; gap: 8px; font-size: 12.5px; color: #c9cad2; }
+
+.code { font-family: var(--mono); font-size: 22px; letter-spacing: 0.12em; color: #fff; }
+.volume-row { display: flex; align-items: center; gap: 8px; }
+.slider-row > .volume-row { flex: 1; min-width: 0; gap: 4px; }
+.volume-row input[type="range"] { flex: 1; min-width: 0; }
+.volume-row .icon-button.on { color: #f0d08a; background: #3a3220; }
+.master-volume.muted input[type="range"] { opacity: 0.5; }
+.volume-pill {
+  display: flex; align-items: center; gap: 4px; height: 28px; flex: 1 1 88px; max-width: 140px; margin-left: auto;
+  padding: 0 10px 0 2px; border-radius: 14px; background: transparent; border: 0;
+}
+.volume-pill .icon-button { width: 24px; height: 24px; flex: none; border: 0; border-radius: 50%; }
+.volume-pill .icon-button.on { color: #f0d08a; }
+.volume-track { position: relative; flex: 1; min-width: 0; display: flex; align-items: center; }
+.volume-pill input[type="range"] { flex: 1; min-width: 0; }
+.volume-bubble {
+  position: absolute; bottom: calc(100% + 4px); left: calc(7px + (100% - 14px) * var(--at)); transform: translateX(-50%);
+  z-index: 5; padding: 2px 6px; border-radius: 4px; background: #2c2d35; border: 1px solid #50515c;
+  color: #fff; font-family: var(--mono); font-size: 11px; white-space: nowrap; pointer-events: none;
+}
+.volume-pill.muted input[type="range"] { opacity: 0.5; }
+
+
+
+/* Card editor */
+.dock.editing { height: 100%; min-height: 0; }
+.editor { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+/* The bar fits the dock: the name takes what's left; undo, redo and ⋯
+   (Duplicate, Delete) are plain icons; ▶ Test is a ghost button. */
+.editor-bar { height: 48px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 10px; background: var(--header); border-bottom: 1px solid var(--border); }
+/* The name's box is as wide as the name, so the switch sits right after it. */
+.editor-bar .name { flex: 0 1 auto; field-sizing: content; min-width: 64px; max-width: 320px; height: 30px; border-color: transparent; background: transparent; color: #fff; font-size: 15px; font-weight: 600; text-overflow: ellipsis; }
+.editor-bar .back { flex: none; }
+.editor-bar .icon-button.flat { width: 30px; height: 30px; flex: none; }
+.editor-bar .button { flex: none; }
+.editor-bar .name:hover, .editor-bar .name:focus { border-color: var(--border-strong); background: var(--field); }
+.editor-bar .spacer { flex: 1 1 0; min-width: 0; }
+.save-state { color: var(--faint); font-size: 12px; white-space: nowrap; }
+.save-state.error { color: var(--error-text); }
+.editor-body { flex: 1; display: flex; min-height: 0; }
+.editor-side { width: 240px; flex: none; display: flex; flex-direction: column; gap: 2px; padding: 12px 8px; background: var(--sidebar); border-right: 1px solid var(--border); overflow-y: auto; }
+.side-head { display: flex; justify-content: space-between; align-items: center; padding: 0 0 6px 8px; }
+.side-title { color: var(--text); font-size: 12.5px; font-weight: 600; }
+.side-card { display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 8px; border-radius: 6px; color: #d4d5db; }
+.side-card:hover { background: #2a2b33; color: #fff; }
+.side-card.current { background: #30374a; color: #fff; }
+.side-card.off { color: var(--faint); }
+.side-card .dot { margin-right: 0; }
+.side-problem { display: flex; color: var(--error-text); }
+.side-problem .icon { width: 14px; height: 14px; }
+.missing { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.side-card .label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bar-menu { position: relative; z-index: 20; }
+.bar-menu-backdrop { position: fixed; inset: 0; }
+.bar-menu-list { position: absolute; top: calc(100% + 4px); right: 0; min-width: 150px; display: flex; flex-direction: column; padding: 4px 0; border-radius: 8px; background: #2c2d35; border: 1px solid #50515c; box-shadow: 0 12px 30px rgba(0, 0, 0, 0.5); }
+.menu-item.danger:hover { background: #5a2f36; }
+.menu-item.two-line { flex-direction: column; align-items: flex-start; gap: 1px; height: auto; padding: 6px 12px; }
+.menu-item:disabled { opacity: 0.45; cursor: default; }
+.menu-item:disabled:hover { background: transparent; }
+.menu-note { color: var(--muted); font-size: 12px; }
+/* A plugin's preset row: the picker (or the name being typed) and its buttons. */
+.preset-control, .text-style-name { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.preset-control select, .preset-control input[type="text"], .text-style-name input { flex: 1; min-width: 0; }
+.preset-menu { min-width: 220px; }
+@media (max-width: 900px) { .editor-side { display: none; } }
+
+.canvas { flex: 1; position: relative; overflow: hidden; min-width: 0; }
+.surface {
+  position: absolute; inset: 0; overflow: hidden; touch-action: none; user-select: none; cursor: default;
+  background-color: var(--ground-deep);
+  background-image: radial-gradient(#2e2f37 1px, transparent 1px);
+}
+.surface.panning { cursor: grabbing; }
+.canvas-empty { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; }
+.canvas-empty p { max-width: 340px; margin: 0; color: var(--muted); text-align: center; line-height: 1.5; }
+.select-box { position: absolute; border: 1px solid var(--accent-line); background: rgba(91, 132, 240, 0.12); pointer-events: none; }
+.world { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+.wires { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
+.wire { fill: none; stroke-width: 2.2; }
+.wire.event { stroke: #d9d9de; stroke-width: 2.6; }
+.wire.number { stroke: var(--socket-number); }
+.wire.text { stroke: var(--socket-text); }
+.wire.emotes { stroke: var(--socket-emotes); }
+.wire.dragging { stroke-dasharray: 6 5; }
+
+.node { position: absolute; border-radius: 8px; background: var(--panel); border: 1px solid var(--border-strong); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35); font-size: 12.5px; }
+.node.selected { border-color: var(--accent-line); box-shadow: 0 0 0 1px var(--accent-line), 0 6px 18px rgba(0, 0, 0, 0.35); }
+.node.problem { border-color: #e05a5a; }
+.node-head { height: 30px; display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 0 10px; border-radius: 7px 7px 0 0; font-weight: 500; cursor: grab; }
+.node-head.events { background: var(--events); }
+.node-name { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.platform-icon { flex: none; }
+/* A plugin's icon: its SVG (served by the app) as a mask over the text's colour. */
+.plugin-icon {
+  display: inline-block; width: 13px; height: 13px; background: currentColor;
+  -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
+  -webkit-mask-position: center; mask-position: center;
+  -webkit-mask-size: contain; mask-size: contain;
+}
+.menu-item .platform-icon.twitch { color: #a970ff; }
+.node-head.flow { background: var(--flow); }
+.node-head.values { background: var(--values); }
+.node-head.effects { background: var(--effects); }
+/* A node's fields line up: its rows with a label and a field share one
+   column of labels, as wide as the longest (at most half the node); the
+   other rows span the node. */
+.node-body { display: grid; grid-template-columns: fit-content(50%) minmax(0, 1fr); column-gap: 8px; padding: 5px 0 8px; }
+.node-body > .node-row { grid-column: 1 / -1; }
+.node-body > .node-row:not(.out):not(.check):not(.column):not(.pair):not(.pick):has(> label:not(.visually-hidden)) {
+  display: grid; grid-template-columns: subgrid;
+}
+.node-body > .node-row:not(.out):not(.check):not(.column):not(.pair):not(.pick):has(> label:not(.visually-hidden)) > label {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* A plugin's tick box: in the fields' column. */
+.node-body > .node-row.check.lined { display: grid; grid-template-columns: subgrid; }
+.node-row.check.lined > .check-in-column { grid-column: 2; display: flex; align-items: center; gap: 6px; min-width: 0; }
+.node-row.check.lined label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.node-row.check.lined input[type="checkbox"] { margin: 0; flex: none; }
+/* An input with no field and an output on one row. */
+.node-row.pair .pair-out { margin-left: auto; }
+.node-row.column { flex-direction: column; align-items: stretch; justify-content: center; gap: 3px; }
+.node-row.column textarea { height: 38px; }
+.node-row textarea.tall { height: 52px; }
+/* A Text node's corner: drag to resize it. */
+.node-resize { position: absolute; right: 0; bottom: 0; width: 14px; height: 14px; cursor: nwse-resize; border-bottom-right-radius: 8px; background: linear-gradient(135deg, transparent 50%, var(--border-strong) 50%, var(--border-strong) 60%, transparent 60%, transparent 72%, var(--border-strong) 72%, var(--border-strong) 82%, transparent 82%); }
+.node-resize:hover { background-color: rgba(255, 255, 255, 0.06); }
+.node-row { position: relative; display: flex; align-items: center; gap: 8px; padding: 0 14px; }
+.node-row.out { justify-content: flex-end; }
+.node-row label { color: var(--muted); }
+.node-row input[type="text"], .node-row input[type="number"], .node-row select { min-width: 0;  height: 26px; padding: 0 6px; border-radius: 5px; flex: 1; width: 100%; }
+.node-row input[type="number"], .node-row input.num { font-family: var(--mono); min-width: 0; }
+.node-row textarea { width: 100%; font-family: var(--mono); font-size: 12px; resize: none; }
+.node-row .picture-pick { flex: 1; gap: 4px; }
+.node-row .picture-pick .upload { width: 26px; height: 26px; }
+.node-row.check { gap: 6px; }
+.node-row.check label { color: var(--text); }
+.node-row.tier { justify-content: flex-start; gap: 5px; padding-left: 6px; }
+.node-row.tier input.num { flex: 0 0 46px; width: 46px; }
+.tier-unit { color: var(--muted); width: 12px; }
+.tier-left { flex: 0 0 63px; color: var(--muted); font-family: var(--mono); font-size: 12px; text-align: right; }
+.tier-remove, .tier-remove-space { flex: none; width: 18px; height: 18px; }
+.tier-remove { padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--faint); font-size: 14px; line-height: 1; }
+.tier-remove:hover { color: var(--text); background: #3a3b45; }
+/* Under the tier names: the tier row's padding, ×, and gap (6 + 18 + 5) less the row's 14. */
+.add-tier { margin-left: 15px; }
+/* × at the row's end, out of the fields' column. */
+.node-row.override { gap: 6px; padding-right: 30px; }
+.node-row.override > .tier-remove { position: absolute; right: 8px; top: 50%; margin-top: -9px; }
+.node-row.override label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--accent-line); }
+.node-row.override .override-colour { flex: 1; height: 24px; padding: 0; border: 1px solid var(--border-strong); border-radius: 4px; background: transparent; }
+.node-row select.add-override { color: var(--muted); }
+/* "+ Change a setting": a quiet line of text that opens the list. */
+.node-row select.add-setting {
+  appearance: none; -webkit-appearance: none; field-sizing: content; flex: none; width: auto; max-width: 100%; height: 22px;
+  padding: 0 16px 0 0; border: 0; border-radius: 4px; color: var(--muted); font-size: 12px; cursor: pointer;
+  background: transparent url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='11' height='11' viewBox='0 0 16 16' fill='none' stroke='%23a9aab3' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 6l4 4 4-4'/%3E%3C/svg%3E") no-repeat right 2px center;
+}
+.node-row select.add-setting:hover, .node-row select.add-setting:focus-visible { color: var(--text); }
+.node-row select.add-setting option { color: var(--text); }
+.node-problems:empty { display: none; }
+.row-hint { margin-left: auto; color: var(--faint); font-size: 11.5px; }
+.list-field { position: relative; flex: 1; min-width: 0; }
+.list-field input { width: 100%; }
+.completions { position: absolute; z-index: 30; top: calc(100% + 4px); left: 0; min-width: 100%; width: max-content; max-width: 280px; display: flex; flex-direction: column; padding: 4px 0; border-radius: 6px; background: #2c2d35; border: 1px solid #50515c; box-shadow: 0 10px 24px rgba(0, 0, 0, 0.5); }
+.completion { display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 10px; cursor: pointer; }
+.completion:hover, .completion.active { background: #3a4566; }
+.completion img { width: 24px; height: 24px; object-fit: contain; flex: none; }
+.completion .code { flex: 1; font-family: var(--mono); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.completion .source { color: var(--faint); font-size: 10.5px; letter-spacing: 0.04em; }
+/* A dropdown's open list (dropdown.rs), drawn in the page; place() sets
+   its place, width limits and font size. Row height and padding in em, as
+   ROW_EM and PAD_EM there. */
+.dropdown-list { position: fixed; z-index: 100; width: max-content; overflow-y: auto; overscroll-behavior: contain; padding: 0.3em 0; border-radius: 6px; background: #2c2d35; border: 1px solid #50515c; box-shadow: 0 10px 24px rgba(0, 0, 0, 0.5); scrollbar-width: thin; }
+.dropdown-option, .dropdown-group { height: 1.8em; line-height: 1.8em; padding: 0 0.8em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dropdown-option { color: var(--text); cursor: default; }
+.dropdown-option.grouped { padding-left: 1.6em; }
+.dropdown-option.active { background: #3a4566; color: var(--text-strong); }
+.dropdown-option.disabled { color: var(--faint); }
+.dropdown-group { color: var(--faint); font-weight: 600; }
+.side-cards { display: flex; flex-direction: column; gap: 2px; }
+/* A node's problems: one box, a line each (2026-10-15). */
+.node-problems { display: flex; flex-direction: column; gap: 4px; margin: 2px 10px 8px; padding: 6px 8px; border-radius: 5px; background: #4a2327; color: #ffb3b3; font-size: 12px; }
+
+.socket { position: absolute; width: 12px; height: 12px; border-radius: 50%; border: 1px solid var(--ground-deep); cursor: crosshair; top: 50%; margin-top: -6px; }
+.socket.in { left: -7px; }
+.socket.out { right: -7px; }
+.socket.event { width: 11px; height: 11px; margin-top: -5.5px; border-radius: 1px; transform: rotate(45deg); background: var(--socket-event); }
+.socket.number { background: var(--socket-number); }
+.socket.text { background: var(--socket-text); }
+.socket.emotes { background: var(--socket-emotes); }
+.socket:hover { box-shadow: 0 0 0 3px rgba(91, 132, 240, 0.45); }
+
+.canvas-tools { position: absolute; left: 14px; top: 14px; display: flex; gap: 8px; z-index: 3; }
+/* Add node, the zoom and the colour key: quiet boxes over the canvas. */
+.button.raised { height: 32px; border: 1px solid var(--border-strong); background: var(--panel); color: var(--text); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3); }
+.button.raised:hover { background: #33343c; }
+.canvas-problems { position: absolute; left: 14px; top: 56px; z-index: 3; max-width: 420px; display: flex; flex-direction: column; gap: 4px; }
+.canvas-problems div { padding: 6px 10px; border-radius: 6px; background: #4a2327; color: #ffb3b3; font-size: 12px; }
+.zoom { position: absolute; left: 14px; bottom: 14px; z-index: 3; display: flex; align-items: center; height: 32px; border-radius: 6px; border: 1px solid var(--border-strong); background: var(--panel); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3); }
+.zoom button { width: 32px; height: 30px; border: 0; background: transparent; color: #c9cad2; }
+.zoom button.fit { width: auto; padding: 0 10px; border-left: 1px solid var(--border-strong); font-size: 12px; }
+.zoom span { padding: 0 6px; color: #c9cad2; font-family: var(--mono); font-size: 12px; }
+.legend { position: absolute; right: 14px; bottom: 14px; z-index: 3; display: flex; align-items: center; gap: 12px; height: 32px; padding: 0 12px; border-radius: 6px; border: 1px solid var(--border-strong); background: var(--panel); color: var(--muted); font-size: 12px; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; }
+.legend i.event { border-radius: 1px; transform: rotate(45deg); width: 8px; height: 8px; background: var(--socket-event); }
+.legend i.number { background: var(--socket-number); }
+.legend i.text { background: var(--socket-text); }
+.legend i.emotes { background: var(--socket-emotes); }
+@media (max-width: 700px) { .legend { display: none; } }
+
+.menu { position: absolute; z-index: 10; width: 290px; display: flex; flex-direction: column; border-radius: 8px; background: #2c2d35; border: 1px solid #50515c; box-shadow: 0 12px 30px rgba(0, 0, 0, 0.5); overflow: hidden; }
+.menu-search { padding: 8px; border-bottom: 1px solid var(--border-strong); }
+.menu-search input { width: 100%; height: 30px; border-color: var(--accent-line); }
+.menu-list { display: flex; flex-direction: column; padding: 6px 0; max-height: 340px; overflow-y: auto; }
+.menu-group, .menu-item { flex: none; }
+.menu-group { padding: 6px 12px 2px; color: var(--faint); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
+/* The Add node menu: headings in words, each with its group's colour,
+   pinned while their nodes scroll under them; no square on every node. */
+.menu.add-menu { width: 300px; }
+.add-menu .menu-list { padding: 0 0 6px; max-height: 420px; }
+.add-menu .menu-group { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 8px; padding: 8px 12px 4px; background: #2c2d35; color: var(--text); font-size: 12.5px; text-transform: none; letter-spacing: normal; }
+.add-menu .menu-group i { width: 3px; height: 12px; border-radius: 2px; }
+.add-menu .menu-item { height: 32px; font-size: 13.5px; }
+.add-menu .menu-item:hover, .add-menu .menu-item.active { background: #30374a; }
+.add-menu .menu-item b { font-weight: 600; color: #fff; }
+.menu-icon { display: inline-flex; justify-content: center; flex: none; width: 15px; }
+.menu-item { display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 12px; border: 0; background: transparent; color: var(--text); text-align: left; }
+.menu-item:hover, .menu-item.active { background: #3a4566; }
+.menu-group i.events { background: #9b72d0; }
+.menu-group i.flow { background: #8a8f9c; }
+.menu-group i.values { background: #4f7fc0; }
+.menu-group i.effects { background: #3f9a6c; }
+.menu-empty { padding: 10px 12px; color: var(--muted); }
+
+/* A plugin's preview on its Plugins box: its page at its size in OBS,
+   scaled, framed with Play and Show on overlay in a strip under it. */
+.preview-frame { display: flex; flex-direction: column; width: 100%; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.plugin-preview {
+  position: relative; width: 100%; overflow: hidden;
+  background: repeating-conic-gradient(#26272d 0% 25%, #222329 0% 50%) 50% / 20px 20px;
+}
+.preview-bar { display: flex; align-items: center; gap: 2px; padding: 4px 6px; border-top: 1px solid var(--border); background: #25262c; }
+/* A plugin's help page (no scripts), under its "Help". */
+.plugin-help summary { cursor: pointer; color: var(--muted); font-size: 13px; font-weight: 500; text-transform: none; letter-spacing: 0; }
+.plugin-help iframe { display: block; width: 100%; height: 420px; margin-top: 6px; border: 1px solid var(--border-strong); border-radius: 6px; background: #fff; }
+.plugin-stage { position: absolute; left: 0; top: 0; border: 0; transform-origin: 0 0; background: transparent; color-scheme: normal; }
+/* A file setting's text (a stylesheet). */
+.css-editor { width: 100%; box-sizing: border-box; min-height: 320px; font-size: 12px; line-height: 1.45; tab-size: 2; white-space: pre; }
+
+/* A dropdown that takes other values too: "Other…" shows a text box beside it. */
+.pick-field { display: flex; gap: 6px; min-width: 0; flex: 1; }
+.pick-field select, .pick-field input[type="text"] { flex: 1; min-width: 0; width: 100%; }
+
+/* The text style list (right-click a selection in a node's text). */
+.style-menu-backdrop { position: fixed; inset: 0; z-index: 100; }
+.menu.style-menu { position: fixed; width: 200px; outline: none; }
+.style-menu .menu-list { padding-top: 0; max-height: 60vh; }
+.style-menu-sample { color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

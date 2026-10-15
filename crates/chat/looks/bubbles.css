@@ -1,0 +1,134 @@
+/* Bubbles: a coloured name tag above a white bubble. On the panel's
+   Plugins → Chat display, typing in it (✎) makes a copy of your own,
+   saved in plugin_data/chat/look/ next to lsk.json, which any editor can
+   change too: the overlay picks up changes as soon as the file is saved.
+   The markup and every class are described under its Help (?) there. */
+
+@import url("https://fonts.googleapis.com/css2?family=Nunito:wght@600;800&display=swap");
+
+/* The whole chat: newest at the bottom, on the left. */
+.chat {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 20px;
+  box-sizing: border-box;
+  font-family: "Nunito", "Segoe UI", sans-serif;
+  font-size: 22px;
+  font-weight: 600;
+  color: #1d1d27;
+}
+
+/* One message: a name tag above a bubble, each as wide as its text. */
+.msg {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  max-width: 100%;
+  animation: msg-in 300ms ease-out both;
+}
+.msg.msg--restored {
+  animation: none;
+}
+.msg.msg--leaving {
+  animation: msg-out 400ms ease-in both;
+}
+
+/* The name tag goes first; what a reply answers comes before it in the
+   markup, so it moves below. */
+.msg__head {
+  order: -1;
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin: 0 0 -8px 12px;
+  padding: 3px 12px;
+  border-radius: 999px;
+  background: var(--name-color, #8a5cf6);
+  color: #ffffff;
+  font-size: 0.8em;
+  font-weight: 800;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+}
+.badge {
+  height: 1.1em;
+}
+
+.msg__body {
+  padding: 12px 16px 10px;
+  border-radius: 18px;
+  background: #ffffff;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.3);
+}
+.msg__body .emote__image {
+  height: 1.6em;
+}
+
+/* Emotes on their own: big, on a small card. */
+.msg--single-emote .msg__body,
+.msg--emotes-only .msg__body {
+  padding: 10px 12px 6px;
+}
+.msg--single-emote .msg__body .emote__image {
+  height: 3.5em;
+}
+.msg--emotes-only .msg__body .emote__image {
+  height: 2.4em;
+}
+
+/* Replies: what they answer, small, above the bubble. */
+.msg__reply {
+  margin: 10px 0 -2px 16px;
+  font-size: 0.7em;
+  color: #ffffff;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 90%;
+}
+.msg__reply-name::before {
+  content: "↪ ";
+}
+
+/* /me messages, in the viewer's colour. */
+.msg--action .msg__body {
+  font-style: italic;
+  color: var(--name-color, #1d1d27);
+}
+
+/* Highlighted, and first-time chatters. */
+.msg--highlighted .msg__body {
+  background: #fff4c2;
+  box-shadow: 0 0 0 3px #ffcc33, 0 3px 10px rgba(0, 0, 0, 0.3);
+}
+.msg--first .msg__body {
+  box-shadow: 0 0 0 3px #4ade80, 0 3px 10px rgba(0, 0, 0, 0.3);
+}
+
+/* Lines from a card's Show in chat node (subs, raids, …). */
+.msg--card .msg__body {
+  background: #2b2140;
+  color: #ffffff;
+  font-weight: 800;
+}
+
+@keyframes msg-in {
+  from {
+    opacity: 0;
+    transform: translateX(-40px);
+  }
+}
+@keyframes msg-out {
+  to {
+    opacity: 0;
+    transform: translateX(-40px);
+  }
+}

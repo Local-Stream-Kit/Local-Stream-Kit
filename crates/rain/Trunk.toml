@@ -1,0 +1,12 @@
+[build]
+target = "index.html"
+# Straight into the built-in plugin's folder, which the server embeds (and
+# a debug server reads from disk). Not committed: built by `cargo dist`
+# and `cargo e2e`, or `trunk build` here.
+dist = "../server/plugins/rain/overlay"
+# Where the server serves the plugin's overlay page.
+public_url = "/plugins/rain/"
+
+# Also rebuild when the shared protocol crate changes.
+[watch]
+watch = [".", "../protocol"]

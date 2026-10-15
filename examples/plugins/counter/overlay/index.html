@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Counter</title>
+  <style>
+    /* Transparent, like the overlay it sits on. */
+    html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: transparent; }
+    #count {
+      position: absolute; right: 40px; top: 40px; padding: 14px 24px; border-radius: 14px;
+      background: rgba(20, 20, 30, 0.85); color: #fff; font: 700 42px system-ui, sans-serif;
+      opacity: 0; transform: translateY(-20px); transition: opacity 0.3s, transform 0.3s;
+    }
+    #count.shown { opacity: 1; transform: none; }
+  </style>
+</head>
+<body>
+  <div id="count"></div>
+  <script src="counter.js"></script>
+</body>
+</html>

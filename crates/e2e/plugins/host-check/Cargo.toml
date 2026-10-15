@@ -1,0 +1,15 @@
+# A plugin for the e2e tests (crates/e2e/tests/plugins.rs); `cargo e2e`
+# builds it with `cargo plugin`.
+[package]
+name = "host-check"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wit-bindgen = "0.62"
+
+[workspace]

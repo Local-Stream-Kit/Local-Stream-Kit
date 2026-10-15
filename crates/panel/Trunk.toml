@@ -1,0 +1,9 @@
+[build]
+target = "index.html"
+dist = "dist"
+# The server serves the panel under this path.
+public_url = "/panel/"
+
+# Also rebuild when the shared protocol crate changes.
+[watch]
+watch = [".", "../protocol"]

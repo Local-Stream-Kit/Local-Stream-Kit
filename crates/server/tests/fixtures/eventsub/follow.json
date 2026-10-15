@@ -1,0 +1,36 @@
+{
+    "metadata": {
+        "message_id": "3a5c6d2e-6f1b-4c1e-9d2a-0b7f2e4c8a11",
+        "message_type": "notification",
+        "message_timestamp": "2023-07-19T10:11:12.464757833Z",
+        "subscription_type": "channel.follow",
+        "subscription_version": "2"
+    },
+    "payload": {
+        "subscription": {
+            "id": "f1c2a387-161a-49f9-a165-0f21d7a4e1c4",
+            "type": "channel.follow",
+            "version": "2",
+            "status": "enabled",
+            "cost": 0,
+            "condition": {
+                "broadcaster_user_id": "1337",
+                "moderator_user_id": "1337"
+            },
+            "transport": {
+                "method": "websocket",
+                "session_id": "AQoQexAWVYKSTIu4ec_2VAxyuhAB"
+            },
+            "created_at": "2023-07-19T10:11:12.634234626Z"
+        },
+        "event": {
+            "user_id": "1234",
+            "user_login": "cool_user2",
+            "user_name": "Cool_User2",
+            "broadcaster_user_id": "1337",
+            "broadcaster_user_login": "cool_user",
+            "broadcaster_user_name": "Cool_User",
+            "followed_at": "2023-07-19T10:11:12.634234626Z"
+        }
+    }
+}

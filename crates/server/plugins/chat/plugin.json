@@ -1,0 +1,50 @@
+{
+  "id": "chat",
+  "name": "Chat display",
+  "version": "1.0.0",
+  "api": 1,
+  "author": "Local Stream Kit",
+  "hears": ["chat"],
+  "own_source": true,
+  "page_hosts": ["fonts.googleapis.com", "fonts.gstatic.com"],
+  "help": "help.html",
+  "preview": { "samples": true, "width": 500, "height": 700, "shown_height": 400 },
+  "settings": [
+    { "key": "look", "label": "Look (CSS)", "short": "CSS", "group": "Look", "type": "file", "file": "chat.css",
+      "default": "looks/bubbles.css",
+      "starts": [
+        { "value": "looks/bubbles.css", "label": "Bubbles" },
+        { "value": "looks/classic.css", "label": "Classic" },
+        { "value": "looks/scrapbook.css", "label": "Scrapbook" }
+      ] },
+    { "key": "max_messages", "label": "Most messages on screen", "short": "On screen", "caption": "messages at most",
+      "group": "Messages", "type": "number", "default": 30, "min": 1, "max": 200, "step": 1 },
+    { "key": "lifetime_secs", "label": "Messages leave after (s, 0 = they stay)", "short": "Leave after",
+      "caption": "seconds (0: they stay)", "group": "Messages", "type": "number", "default": 0, "min": 0, "max": 3600 },
+    { "key": "show_commands", "label": "Show commands (messages starting with !)", "short": "Commands",
+      "group": "Messages", "type": "bool", "default": false },
+    { "key": "show_reply_to", "label": "Show the message a reply answers", "short": "Replies",
+      "group": "Messages", "type": "bool", "default": true },
+    { "key": "hidden_users", "label": "Leave out these viewers (bots)", "short": "Leave out", "group": "Messages",
+      "type": "text", "many": true, "placeholder": "A viewer's name",
+      "default": "Nightbot, StreamElements, Streamlabs, Moobot, Fossabot, WizeBot, Sery_Bot" }
+  ],
+  "nodes": [
+    {
+      "id": "show",
+      "title": "Show in chat",
+      "category": "effects",
+      "viewer": true,
+      "describe": "message",
+      "inputs": [
+        { "name": "trigger", "label": "Trigger", "type": "event" },
+        { "name": "message", "label": "Message", "type": "text" }
+      ],
+      "settings": [
+        { "key": "message", "label": "Message", "type": "text", "default": "{summary}" },
+        { "key": "class", "label": "Class", "type": "text", "placeholder": "For the chat CSS" },
+        { "key": "show_viewer", "label": "Show the viewer's name", "type": "bool", "default": true }
+      ]
+    }
+  ]
+}

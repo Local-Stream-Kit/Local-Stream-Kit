@@ -1,0 +1,32 @@
+{
+    "name": "lsk-streamdeck",
+    "private": true,
+    "license": "SEE LICENSE IN ../LICENSE.md",
+    "description": "Stream Deck plugin for Local Stream Kit's control API",
+    "type": "module",
+    "scripts": {
+        "build": "rollup -c",
+        "watch": "rollup -c -w --watch.onEnd=\"streamdeck restart com.localstreamkit.streamdeck\"",
+        "test": "tsc -p tsconfig.test.json && node --test \"test-build/**/*.test.js\"",
+        "pack": "npm run build && streamdeck validate com.localstreamkit.streamdeck.sdPlugin && streamdeck pack com.localstreamkit.streamdeck.sdPlugin --output dist --force",
+        "icons": "node scripts/icons.mjs",
+        "try": "node scripts/fake-stream-deck.mjs"
+    },
+    "devDependencies": {
+        "@elgato/cli": "^1.10.2",
+        "@rollup/plugin-commonjs": "^29.0.3",
+        "@rollup/plugin-node-resolve": "^16.0.3",
+        "@rollup/plugin-terser": "^1.0.0",
+        "@rollup/plugin-typescript": "^12.3.0",
+        "@tsconfig/node20": "^20.1.10",
+        "@types/node": "~24.1.0",
+        "@types/ws": "^8.18.2",
+        "rollup": "^4.64.5",
+        "tslib": "^2.8.1",
+        "typescript": "^5.9.3",
+        "ws": "^8.22.0"
+    },
+    "dependencies": {
+        "@elgato/streamdeck": "^3.0.2"
+    }
+}

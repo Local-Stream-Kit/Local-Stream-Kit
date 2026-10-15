@@ -1,0 +1,7 @@
+node_modules/
+test-build/
+dist/
+*.sdPlugin/bin
+*.sdPlugin/logs
+*.sdPlugin/ui/settings.js
+logs/

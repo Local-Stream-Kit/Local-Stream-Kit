@@ -1,0 +1,72 @@
+{
+  "id": "rain",
+  "name": "Emote rain",
+  "version": "1.0.0",
+  "api": 1,
+  "author": "Local Stream Kit",
+  "preview": {
+    "node": "rain",
+    "values": {
+      "emotes": [
+        { "code": "Kappa", "url": "/emote/twitch/25", "overlays": [] },
+        { "code": "LUL", "url": "/emote/twitch/425618", "overlays": [] },
+        { "code": "HeyGuys", "url": "/emote/twitch/30259", "overlays": [] },
+        { "code": "BibleThump", "url": "/emote/twitch/86", "overlays": [] }
+      ],
+      "count": 30
+    }
+  },
+  "settings": [
+    { "key": "emote_height_px", "label": "Emote size", "type": "number", "default": 64, "min": 16, "max": 400,
+      "unit": "px", "step": 1, "slider": true, "group": "Look" },
+    { "key": "size_variation", "label": "Size variation", "type": "number", "default": 0.25, "min": 0, "max": 0.95,
+      "unit": "percent", "step": 0.05, "slider": true, "group": "Look" },
+    { "key": "overlap", "label": "Overlap when piled up", "short": "Overlap", "type": "number", "default": 0.25, "min": 0, "max": 0.9,
+      "unit": "percent", "step": 0.05, "slider": true, "group": "Look" },
+    { "key": "corner_rounding", "label": "Corner rounding", "type": "number", "default": 0.4, "min": 0, "max": 1,
+      "step": 0.05, "slider": true, "group": "Look" },
+    { "key": "restitution", "label": "Bounciness", "type": "number", "default": 0.35, "min": 0, "max": 1,
+      "unit": "percent", "step": 0.05, "slider": true, "group": "Physics" },
+    { "key": "friction", "label": "Friction", "type": "number", "default": 0.6, "min": 0, "max": 2,
+      "step": 0.05, "slider": true, "group": "Physics" },
+    { "key": "gravity", "label": "Gravity", "type": "number", "default": 9.81, "min": 0.5, "max": 30,
+      "unit": "metres_per_second_squared", "step": 0.1, "slider": true, "group": "Physics" },
+    { "key": "bottom_weight", "label": "Weight towards the bottom", "short": "Bottom-heavy",
+      "type": "number", "default": 0.8, "min": 0, "max": 1, "unit": "percent", "step": 0.05, "slider": true, "group": "Physics" },
+    { "key": "lifetime_ms", "label": "Lifetime", "type": "number", "default": 8000, "min": 1000, "max": 120000,
+      "unit": "ms", "step": 500, "slider": true, "group": "Timing and limits" },
+    { "key": "fade_ms", "label": "Fade-out", "type": "number", "default": 1000, "min": 0, "max": 10000,
+      "unit": "ms", "step": 100, "slider": true, "group": "Timing and limits" },
+    { "key": "spawn_timeout_ms", "label": "Drop emotes whose image takes longer than", "short": "Load timeout",
+      "type": "number",
+      "default": 5000, "min": 1000, "max": 30000, "unit": "ms", "step": 500, "slider": true, "group": "Timing and limits" },
+    { "key": "max_concurrent", "label": "Most emotes on screen (0 = no limit)", "short": "Emotes limit",
+      "type": "number", "default": 0,
+      "min": 0, "max": 1000, "step": 10, "slider": true, "group": "Timing and limits" }
+  ],
+  "nodes": [
+    {
+      "id": "rain",
+      "title": "Emote rain",
+      "category": "effects",
+      "inputs": [
+        { "name": "trigger", "label": "Trigger", "type": "event" },
+        { "name": "emotes", "label": "Emotes", "type": "emotes" },
+        { "name": "count", "label": "Count", "type": "number" }
+      ],
+      "settings": [
+        { "key": "emotes", "label": "Emotes", "type": "emotes", "default": "random", "count": "count" },
+        { "key": "count", "label": "Count", "type": "number", "default": 20, "min": 0, "max": 500,
+          "when": { "unwired": "emotes" } },
+        { "key": "per_message", "label": "Rain", "type": "choice", "default": "each", "when": { "wired": "emotes" },
+          "options": [
+            { "value": "each", "label": "Every emote" },
+            { "value": "distinct", "label": "Each different emote" },
+            { "value": "one", "label": "One random emote" }
+          ] }
+      ],
+      "changes": ["restitution", "friction", "gravity", "emote_height_px", "size_variation", "overlap",
+                  "bottom_weight", "corner_rounding", "lifetime_ms", "fade_ms"]
+    }
+  ]
+}

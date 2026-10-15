@@ -1,0 +1,19 @@
+[package]
+name = "obs"
+description = "The built-in OBS plugin's server code: OBS control through obs-websocket, a WebAssembly component"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license-file.workspace = true
+
+# Built for wasm32-wasip2 into crates/server/plugins/obs/server.wasm by
+# `cargo dist` and `cargo e2e`; on other targets only for its tests.
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+wit-bindgen = "0.62"
+serde.workspace = true
+serde_json.workspace = true
+sha2 = "0.10"     # obs-websocket's authentication
+base64 = "0.22"

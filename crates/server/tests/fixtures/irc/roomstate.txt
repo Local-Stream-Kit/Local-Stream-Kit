@@ -1,0 +1,2 @@
+@emote-only=0;followers-only=10080;r9k=0;room-id=641972806;slow=0;subs-only=0 :tmi.twitch.tv ROOMSTATE #kaicenat
+@emote-only=0;followers-only=1440;r9k=0;room-id=71092938;slow=0;subs-only=0 :tmi.twitch.tv ROOMSTATE #xqc

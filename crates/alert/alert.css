@@ -1,0 +1,113 @@
+/* How alerts look, shared by the overlay and the control panel's preview.
+   The markup, classes and variables come from protocol::alert. Sizes are
+   for a 1920 × 1080 overlay; the preview scales the whole stage. */
+
+.alert-frame {
+  position: absolute;
+  inset: 0;
+  padding: 4% 4%;
+  box-sizing: border-box;
+  pointer-events: none;
+}
+/* Inside the frame's margin: the alert goes --x across and --y down it
+   (0–1, AlertStyle::frame_css), the same point of the alert on that point
+   of the room, so it stays inside and a bigger one grows away from the
+   edges it's against. */
+.alert-room { position: relative; width: 100%; height: 100%; }
+
+.alert {
+  position: absolute;
+  left: calc(var(--x, 0.5) * 100%);
+  top: calc(var(--y, 0) * 100%);
+  translate: calc(var(--x, 0.5) * -100%) calc(var(--y, 0) * -100%);
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  width: max-content;
+  max-width: 70%;
+  padding: 0.6em 1.4em;
+  border-radius: var(--alert-radius, 14px);
+  background: var(--alert-background, rgba(20, 20, 30, 0.85));
+  color: var(--alert-color, #fff);
+  font-family: var(--alert-font, system-ui, sans-serif);
+  font-size: var(--alert-size, 38px);
+  font-weight: var(--alert-weight, 700);
+  font-style: var(--alert-style, normal);
+  line-height: 1.3;
+  text-align: center;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+  overflow-wrap: anywhere;
+}
+/* Line breaks typed in the message start a new line. */
+.alert-text { white-space: pre-line; }
+.alert.picture-above { flex-direction: column; }
+.alert.picture-below { flex-direction: column-reverse; }
+.alert.picture-left { flex-direction: row; text-align: left; }
+.alert.picture-right { flex-direction: row-reverse; text-align: right; }
+.alert-picture {
+  display: block;
+  height: var(--alert-picture-height, 200px);
+  max-width: 100%;
+  object-fit: contain;
+  flex: none;
+}
+.alert.picture-left .alert-picture, .alert.picture-right .alert-picture { max-width: 50%; }
+
+/* Emotes in the text, about the height of a line; zero-width emotes stack on
+   the emote, centred, as in chat. */
+.alert-emote {
+  display: inline-grid;
+  vertical-align: middle;
+  margin: -0.15em 0.05em;
+}
+.alert-emote img {
+  grid-area: 1 / 1;
+  place-self: center;
+  height: 1.5em;
+  width: auto;
+}
+
+/* Coming and going: 400 ms each way (AlertAnimation::leave_ms). */
+.alert.anim-slide-down { animation: alert-slide-down-in 400ms ease-out both; }
+.alert.anim-slide-down.leaving { animation: alert-slide-down-out 400ms ease-in both; }
+.alert.anim-slide-up { animation: alert-slide-up-in 400ms ease-out both; }
+.alert.anim-slide-up.leaving { animation: alert-slide-up-out 400ms ease-in both; }
+.alert.anim-fade { animation: alert-fade-in 400ms ease-out both; }
+.alert.anim-fade.leaving { animation: alert-fade-out 400ms ease-in both; }
+.alert.anim-pop { animation: alert-pop-in 400ms cubic-bezier(0.34, 1.56, 0.64, 1) both; }
+.alert.anim-pop.leaving { animation: alert-pop-out 400ms ease-in both; }
+/* The preview's alert drawn again in a new style: it's already there. */
+.alert.still { animation: none; }
+
+@keyframes alert-slide-down-in {
+  from { opacity: 0; transform: translateY(-40px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes alert-slide-down-out {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: translateY(-40px); }
+}
+@keyframes alert-slide-up-in {
+  from { opacity: 0; transform: translateY(40px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes alert-slide-up-out {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: translateY(40px); }
+}
+@keyframes alert-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes alert-fade-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+@keyframes alert-pop-in {
+  from { opacity: 0; transform: scale(0.3); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes alert-pop-out {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: scale(0.6); }
+}

@@ -1,0 +1,53 @@
+{
+  "id": "particles",
+  "name": "Particles",
+  "version": "1.0.0",
+  "api": 1,
+  "author": "Local Stream Kit",
+  "preview": { "node": "burst" },
+  "nodes": [
+    {
+      "id": "burst",
+      "title": "Particles",
+      "category": "effects",
+      "inputs": [
+        { "name": "trigger", "label": "Trigger", "type": "event" },
+        { "name": "emotes", "label": "Emotes", "type": "emotes" },
+        { "name": "count", "label": "How many", "type": "number" }
+      ],
+      "settings": [
+        {
+          "key": "shape",
+          "label": "Pieces",
+          "type": "choice",
+          "default": "confetti",
+          "options": [
+            { "value": "confetti", "label": "Confetti" },
+            { "value": "hearts", "label": "Hearts" },
+            { "value": "stars", "label": "Stars" },
+            { "value": "snow", "label": "Snow" },
+            { "value": "picture", "label": "A picture" }
+          ]
+        },
+        { "key": "picture", "label": "Picture", "type": "picture" },
+        {
+          "key": "from",
+          "label": "From",
+          "type": "choice",
+          "default": "corners",
+          "options": [
+            { "value": "corners", "label": "The bottom corners" },
+            { "value": "top", "label": "The top" },
+            { "value": "bottom", "label": "The bottom" },
+            { "value": "middle", "label": "The middle" }
+          ]
+        },
+        { "key": "colour", "label": "Colour", "type": "colour", "default": "#ff4f8b" },
+        { "key": "rainbow", "label": "Many colours", "type": "bool", "default": true },
+        { "key": "size", "label": "Size (px)", "type": "number", "default": 14, "min": 4, "max": 200 },
+        { "key": "seconds", "label": "Lasts (s)", "type": "number", "default": 5, "min": 1, "max": 60 },
+        { "key": "count", "label": "How many", "type": "number", "default": 150, "min": 1, "max": 1000 }
+      ]
+    }
+  ]
+}
