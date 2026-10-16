@@ -6,7 +6,7 @@
 //! notice on top.
 
 use gloo::timers::callback::Timeout;
-use protocol::config::EMOTE_SOURCES;
+use protocol::config::{EMOTE_SOURCES, TwitchPermissions};
 use protocol::panel::{ChatStatus, LoginStatus, PanelRequest, Status};
 use protocol::update::{self, AppLink, UpdateStatus};
 use yew::prelude::*;
@@ -74,6 +74,9 @@ fn twitch_summary(status: &Status) -> Html {
         (ChatStatus::Off, _) => summary("off", "No channel"),
         (ChatStatus::Connecting { .. }, _) => summary("warn", "Connecting…"),
         (_, LoginStatus::Waiting { .. }) => summary("accent", "Waiting for approval"),
+        (_, LoginStatus::LoggedIn { .. }) if status.renewal.is_some() => {
+            summary("accent", "Waiting for approval")
+        }
         (_, LoginStatus::LoggedIn { listening: false, .. } | LoginStatus::Checking) => {
             summary("warn", "Logging in…")
         }
@@ -107,46 +110,16 @@ fn TwitchBox(props: &TwitchBoxProps) -> Html {
         ChatStatus::Connecting { .. } => state_line("status-chat", "warn", "Connecting…"),
         ChatStatus::Connected { .. } => state_line("status-chat", "ok", "Connected"),
     };
-    // What the login listens for (Twitch can refuse follows or hype trains
-    // alone); nothing while there's no login.
-    let events: Vec<(&str, &str, Html)> = match &status.login {
-        LoginStatus::LoggedIn { listening: false, .. } => {
-            let connecting = |id: &str| state_line(id, "warn", "Connecting…");
-            vec![
-                ("status-channel-points", "Channel points", connecting("status-channel-points")),
-                ("status-follows", "Follows", connecting("status-follows")),
-                ("status-hype-train", "Hype train", connecting("status-hype-train")),
-            ]
-        }
-        LoginStatus::LoggedIn { listening: true, follows, hype_train, .. } => {
-            let heard = |id: &str, on: bool| {
-                if on {
-                    state_line(id, "ok", "Listening")
-                } else {
-                    state_line(id, "warn", "Twitch refused; see the log")
-                }
-            };
-            let rewards = status.rewards.len();
-            vec![
-                (
-                    "status-channel-points",
-                    "Channel points",
-                    state_line(
-                        "status-channel-points",
-                        "ok",
-                        format!("Listening · {rewards} reward{}", if rewards == 1 { "" } else { "s" }),
-                    ),
-                ),
-                ("status-follows", "Follows", heard("status-follows", *follows)),
-                ("status-hype-train", "Hype train", heard("status-hype-train", *hype_train)),
-            ]
-        }
+    // What the login may do (a tick each) and how each is going; the
+    // ticks are picked before logging in too.
+    let events: Vec<Html> = match &status.login {
         LoginStatus::TwitchCli { .. } => ["status-channel-points", "status-follows", "status-hype-train"]
             .into_iter()
             .zip(["Channel points", "Follows", "Hype train"])
-            .map(|(id, label)| (id, label, state_line(id, "ok", "From the Twitch CLI")))
+            .map(|(id, label)| row(id, label, false, state_line(id, "ok", "From the Twitch CLI")))
             .collect(),
-        _ => Vec::new(),
+        LoginStatus::Off => Vec::new(),
+        login => permission_rows(&panel, config.connections.twitch_permissions, login, status),
     };
     // Open when it needs a look: no channel, or a login waiting for its
     // code to be approved.
@@ -162,10 +135,140 @@ fn TwitchBox(props: &TwitchBoxProps) -> Html {
                 }) }
                 { row("status-chat", "Chat", false, chat) }
                 { row("status-login", "Login", true, html! { <LoginControl /> }) }
-                { for events.into_iter().map(|(id, label, state)| row(id, label, false, state)) }
+                { for events }
             </div>
         </FoldBox>
     }
+}
+
+/// What each tick is.
+struct Permission {
+    key: &'static str,
+    label: &'static str,
+    /// What it allows, on hover.
+    what: &'static str,
+    get: fn(&TwitchPermissions) -> bool,
+    set: fn(&mut TwitchPermissions, bool),
+}
+
+const PERMISSIONS: [Permission; 5] = [
+    Permission {
+        key: "channel-points",
+        label: "Channel points",
+        what: "Channel point redemptions",
+        get: |p| p.channel_points,
+        set: |p, on| p.channel_points = on,
+    },
+    Permission {
+        key: "follows",
+        label: "Follows",
+        what: "Follows, and since when on viewers' cards",
+        get: |p| p.follows,
+        set: |p, on| p.follows = on,
+    },
+    Permission {
+        key: "hype-train",
+        label: "Hype train",
+        what: "Hype trains",
+        get: |p| p.hype_train,
+        set: |p, on| p.hype_train = on,
+    },
+    Permission {
+        key: "moderating",
+        label: "Moderating",
+        what: "Timeouts, bans, warnings, deleting messages and shoutouts, from viewers' cards",
+        get: |p| p.moderating,
+        set: |p, on| p.moderating = on,
+    },
+    Permission {
+        key: "roles",
+        label: "VIPs and mods",
+        what: "Making viewers VIPs and mods, and taking it back",
+        get: |p| p.roles,
+        set: |p, on| p.roles = on,
+    },
+];
+
+/// The Twitch box's rows for what the login may do: a tick each (saved in
+/// the config), and with a login, how it's going: off, needing a new login
+/// (ticked, but the login was made without it), or its own state.
+fn permission_rows(
+    panel: &Panel,
+    ticked: TwitchPermissions,
+    login: &LoginStatus,
+    status: &Status,
+) -> Vec<Html> {
+    let channel = panel
+        .model
+        .config
+        .as_ref()
+        .map(|config| config.connections.twitch_channel.clone())
+        .unwrap_or_default();
+    PERMISSIONS
+        .iter()
+        .map(|permission| {
+            let id = format!("allow-{}", permission.key);
+            let on = (permission.get)(&ticked);
+            let onchange = {
+                let (panel, set) = (panel.clone(), permission.set);
+                Callback::from(move |event: Event| {
+                    let on = util::checked_of(&event);
+                    panel.edit(None, move |config| set(&mut config.connections.twitch_permissions, on));
+                })
+            };
+            let state_id = format!("status-{}", permission.key);
+            let state = match login {
+                LoginStatus::LoggedIn { login, listening, points, follows, hype_train, granted } => {
+                    let heard = |on: bool| {
+                        if !*listening {
+                            state_line(&state_id, "warn", "Connecting…")
+                        } else if on {
+                            state_line(&state_id, "ok", "Listening")
+                        } else {
+                            state_line(&state_id, "warn", "Twitch refused; see the log")
+                        }
+                    };
+                    if !on {
+                        state_line(&state_id, "off", "Off")
+                    } else if !(permission.get)(granted) {
+                        state_line(&state_id, "warn", "Needs a new login")
+                    } else {
+                        match permission.key {
+                            "channel-points" if *listening && *points => {
+                                let rewards = status.rewards.len();
+                                let text = format!(
+                                    "Listening · {rewards} reward{}",
+                                    if rewards == 1 { "" } else { "s" }
+                                );
+                                state_line(&state_id, "ok", text)
+                            }
+                            "channel-points" => state_line(&state_id, "warn", "Connecting…"),
+                            "follows" => heard(*follows),
+                            "hype-train" => heard(*hype_train),
+                            // Moderating and VIPs and mods: as the
+                            // broadcaster, in their own chat only.
+                            _ if !channel.is_empty() && !channel.eq_ignore_ascii_case(login) => {
+                                state_line(&state_id, "warn", format!("Only in {login}’s chat"))
+                            }
+                            _ => state_line(&state_id, "ok", "Ready"),
+                        }
+                    }
+                }
+                _ => html! {},
+            };
+            html! {
+                <div class="setting-row">
+                    <label class="setting-label" for={id.clone()}>{ permission.label }</label>
+                    <div class="setting-control">
+                        <div class="tick-state">
+                            <input type="checkbox" id={id} checked={on} title={permission.what} {onchange} />
+                            { state }
+                        </div>
+                    </div>
+                </div>
+            }
+        })
+        .collect()
 }
 
 /// The emotes: the global ones, Twitch's, and each third-party source's
@@ -372,7 +475,7 @@ fn SystemBox() -> Html {
 /// A link to one of the app's pages, opened in the browser of the PC the
 /// app runs on (as viewers' links are): in an OBS dock it would open
 /// inside OBS.
-fn app_link(panel: &Panel, id: &str, link: AppLink, href: String, text: &str) -> Html {
+pub(super) fn app_link(panel: &Panel, id: &str, link: AppLink, href: String, text: &str) -> Html {
     let onclick = {
         let panel = panel.clone();
         Callback::from(move |event: MouseEvent| {
@@ -389,7 +492,7 @@ fn app_link(panel: &Panel, id: &str, link: AppLink, href: String, text: &str) ->
 }
 
 /// `text` with a capital first letter: errors come as "couldn't …".
-fn capitalised(text: &str) -> String {
+pub(super) fn capitalised(text: &str) -> String {
     let mut chars = text.chars();
     chars.next().map(|first| first.to_uppercase().chain(chars).collect()).unwrap_or_default()
 }

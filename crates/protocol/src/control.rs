@@ -17,7 +17,7 @@ use serde_json::{Map, Value};
 
 use std::collections::BTreeMap;
 
-use crate::activity::{QueueAction, QueueGroup, QueueItem, QueueState, Skipped};
+use crate::activity::{Moved, QueueAction, QueueGroup, QueueItem, QueueState, Skipped};
 use crate::cards::{Card, NodeKind};
 use crate::config::AppConfig;
 use crate::encode_segment;
@@ -61,6 +61,11 @@ pub fn queue_path(action: QueueAction, only: Option<QueueGroup>) -> String {
 /// `queue.up_next`).
 pub fn skip_item_path(id: u64) -> String {
     format!("/control/items/{id}/skip")
+}
+
+/// Moves one waiting queue item to the front, by its id, so it plays next.
+pub fn play_next_path(id: u64) -> String {
+    format!("/control/items/{id}/next")
 }
 
 /// `path` with the key added, ready to copy.
@@ -303,11 +308,11 @@ impl QueueSummary {
     }
 }
 
-/// A queue item, enough to show it and skip it by its id.
+/// A queue item, enough to show it, and skip it or play it next by its id.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ItemSummary {
-    /// What [`ControlRequest::SkipItem`] takes; unique, kept across
-    /// restarts.
+    /// What [`ControlRequest::SkipItem`] and [`ControlRequest::PlayNext`]
+    /// take; unique, kept across restarts.
     pub id: u64,
     /// Its node's title: `Alert`, `Speak`.
     pub label: String,
@@ -343,7 +348,7 @@ pub fn custom_events(cards: &[Card]) -> Vec<String> {
 /// `/control/state`, `/control/cards/{id}/{on|off|toggle}`,
 /// `/control/effects/{id}/{on|off|toggle}`,
 /// `/control/queue/{pause|resume|toggle|skip|clear}` (a clear with
-/// `?kind=follow` takes only follows), `/control/items/{id}/skip`,
+/// `?kind=follow` takes only follows), `/control/items/{id}/{skip|next}`,
 /// `/control/mute/{on|off|toggle}`, `/control/history/seen` and
 /// `/control/events/{name}` (its data from the query and a JSON body).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -373,6 +378,13 @@ pub enum ControlRequest {
     SkipItem {
         id: u64,
     },
+    /// Moves one waiting queue item to the front by its id (2026-10-16),
+    /// so it plays once what's on stage ends. One that's on stage or gone
+    /// already is left alone: answered [`Moved::OnStage`] or
+    /// [`Moved::Gone`], not an error.
+    PlayNext {
+        id: u64,
+    },
     /// Mutes every sound (on), or unmutes (off), live.
     Mute {
         set: Switch,
@@ -387,6 +399,15 @@ pub enum ControlRequest {
         name: String,
         #[serde(default, skip_serializing_if = "Map::is_empty")]
         data: Map<String, Value>,
+    },
+    /// Says which program this is, and its version, after connecting
+    /// (2026-10-16). The Stream Deck plugin sends `client`
+    /// [`streamdeck::CLIENT`](crate::streamdeck::CLIENT), and Status shows
+    /// its version while it's connected. WebSocket only; a second one
+    /// replaces the first.
+    Hello {
+        client: String,
+        version: String,
     },
     /// Makes this connection a plugin: its node types join the cards'
     /// while it's connected, and are remembered after it goes. WebSocket
@@ -442,6 +463,11 @@ pub enum ControlMessage {
         id: u64,
         was: Skipped,
     },
+    /// The answer to a [`ControlRequest::PlayNext`]: what became of it.
+    MovedItem {
+        id: u64,
+        was: Moved,
+    },
     Sound {
         sound: SoundState,
     },
@@ -451,6 +477,10 @@ pub enum ControlMessage {
     },
     Fired {
         name: String,
+    },
+    /// The answer to a [`ControlRequest::Hello`]: the app's version.
+    Hello {
+        version: String,
     },
     /// This connection is now the plugin `plugin`.
     Registered {
@@ -508,6 +538,7 @@ mod tests {
         );
         assert_eq!(with_key("/control/queue/skip", "k"), "/control/queue/skip?key=k");
         assert_eq!(skip_item_path(42), "/control/items/42/skip");
+        assert_eq!(play_next_path(42), "/control/items/42/next");
         assert_eq!(event_path("party mode"), "/control/events/party%20mode");
         assert_eq!(connection_url("http://localhost:3000", "abc"), "http://localhost:3000/control/?key=abc");
     }
@@ -582,14 +613,28 @@ mod tests {
         assert_eq!(request, ControlRequest::Event { name: "party".into(), data: Map::new() });
         let request: ControlRequest = serde_json::from_str(r#"{"type":"skip_item","id":7}"#).unwrap();
         assert_eq!(request, ControlRequest::SkipItem { id: 7 });
+        let request: ControlRequest = serde_json::from_str(r#"{"type":"play_next","id":7}"#).unwrap();
+        assert_eq!(request, ControlRequest::PlayNext { id: 7 });
         let request: ControlRequest = serde_json::from_str(r#"{"type":"history_seen"}"#).unwrap();
         assert_eq!(request, ControlRequest::HistorySeen);
+        let request: ControlRequest =
+            serde_json::from_str(r#"{"type":"hello","client":"streamdeck","version":"0.1.1.0"}"#).unwrap();
+        assert_eq!(request, ControlRequest::Hello { client: "streamdeck".into(), version: "0.1.1.0".into() });
+        assert_eq!(
+            serde_json::to_value(ControlMessage::Hello { version: "0.1.1".into() }).unwrap(),
+            serde_json::json!({ "type": "hello", "version": "0.1.1" })
+        );
         let skipped = ControlMessage::SkippedItem { id: 7, was: Skipped::OnStage };
         assert_eq!(
             serde_json::to_value(&skipped).unwrap(),
             serde_json::json!({ "type": "skipped_item", "id": 7, "was": "on_stage" })
         );
         assert_eq!(serde_json::to_value(Skipped::Gone).unwrap(), "gone");
+        let moved = ControlMessage::MovedItem { id: 7, was: Moved::Waiting };
+        assert_eq!(
+            serde_json::to_value(&moved).unwrap(),
+            serde_json::json!({ "type": "moved_item", "id": 7, "was": "waiting" })
+        );
         let error = ControlMessage::Error { status: 404, error: "no card".into() };
         assert_eq!(serde_json::to_value(&error).unwrap()["type"], "error");
     }

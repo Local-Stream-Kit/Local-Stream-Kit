@@ -47,8 +47,10 @@ Program Files), download the new version from its release page instead.
    address).
 3. On **Status**, type your Twitch channel. Chat, emotes, bits, subs,
    gifted subs and raids then work without logging in. **Log in with
-   Twitch**, with the broadcaster's account, adds channel points, follows
-   and hype trains.
+   Twitch**, with the broadcaster's account, adds channel points, follows,
+   hype trains and, if you tick them first, moderating viewers from their
+   cards in Activity (timeout, ban, warn) and making them VIPs and mods.
+   Twitch is only asked for what's ticked.
 
 ## Setting up OBS
 
@@ -75,6 +77,25 @@ Program Files), download the new version from its release page instead.
 - **OBS control** (cards that switch scenes, show sources and the like):
   in OBS, Tools → WebSocket Server Settings → Enable WebSocket server,
   then put its password in the panel's Plugins → OBS.
+
+## Stream Deck
+
+The app has a Stream Deck plugin built in: keys that switch cards and
+effects, run the alert queue, mute the sound and fire your own events,
+showing what's on.
+
+1. On **Status → Control API**, next to Stream Deck, click **Install**. Stream
+   Deck (the app on this PC) asks whether to install it. Each release
+   also has the plugin as a file of its own,
+   `com.localstreamkit.streamdeck.streamDeckPlugin`: opening it does the
+   same.
+2. Drag a Local Stream Kit key onto your Stream Deck, and paste the
+   **Address** from Status → Control API into the key's Address (once:
+   every key shares it).
+
+Status shows the plugin's version while it's connected. When the app is
+updated and the plugin is older than the one in it, Status offers
+**Update**. More in [streamdeck/README.md](streamdeck/README.md).
 
 ## More
 
@@ -104,9 +125,12 @@ cargo install trunk
 cargo dist
 ```
 
-`cargo dist` builds the overlay, the control panel and the built-in
-plugins' pages in release mode, then the app, which embeds them:
-`target/release/lsk.exe` is all you need to run it.
+`cargo dist` builds the overlay, the control panel, the built-in
+plugins' pages and the Stream Deck plugin in release mode, then the app,
+which embeds them: `target/release/lsk.exe` is all you need to run it.
+The Stream Deck plugin needs [Node.js](https://nodejs.org) 24;
+`cargo dist --no-streamdeck` leaves it out (Status then links to a
+release's plugin file instead of installing one).
 
 While working on it:
 
@@ -120,7 +144,10 @@ While working on it:
 - `cargo e2e`: the control panel end to end, in headless Edge or Chrome.
 - `cargo plugin <folder>`: a plugin's Rust server code, built to its
   `server.wasm`.
-- `cargo streamdeck`: the Stream Deck plugin (needs Node.js 24).
+- `cargo streamdeck`: the Stream Deck plugin on its own (needs Node.js
+  24).
+- `cargo run -p lsk --features streamdeck` builds the plugin
+  `cargo streamdeck` made into the app, so Install works.
 
 ## Licence
 

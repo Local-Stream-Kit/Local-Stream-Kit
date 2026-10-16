@@ -87,6 +87,15 @@ pub struct PanelState {
     pub speech_previews: SpeechPreviews,
     /// The update check and download.
     pub updates: crate::update::Updater,
+    /// Opens links, folders and files on this PC (or logs them, in tests).
+    pub desktop: crate::desktop::Desktop,
+    /// The cache folder, where Install writes the Stream Deck plugin.
+    pub cache: std::path::PathBuf,
+    /// Every chat message, for the viewers' cards.
+    pub chat_log: crate::services::chat_log::ChatLog,
+    /// Moderating viewers with the Twitch login; `None` with the Twitch CLI
+    /// or a recording.
+    pub moderation: Option<crate::providers::twitch_eventsub::TwitchModeration>,
 }
 
 /// After a Try reading's length, before the panels' spinner stops: about
@@ -237,6 +246,11 @@ async fn connection(socket: WebSocket, panel: PanelState) {
     plugin_options.mark_changed();
     let mut speech_previews = panel.speech_previews.subscribe();
     speech_previews.mark_changed();
+    let mut chat_changes = panel.chat_log.subscribe();
+    // Answers about viewers, which wait on the disk or on Twitch; and the
+    // card this panel has open.
+    let (replies, mut answers) = mpsc::channel::<PanelEvent>(32);
+    let mut open_viewer: Option<String> = None;
     let mut refresh = tokio::time::interval(REFRESH);
     tracing::info!("control panel connected");
 
@@ -286,6 +300,10 @@ async fn connection(socket: WebSocket, panel: PanelState) {
                 };
                 match serde_json::from_str::<PanelRequest>(&text) {
                     Ok(request) => {
+                        let Some(request) = crate::viewers::handle(request, &panel, &mut open_viewer, &replies)
+                        else {
+                            continue;
+                        };
                         if let Some(reply) = handle(request, &panel).await
                             && send(&mut sender, &reply).await.is_err()
                         {
@@ -377,6 +395,25 @@ async fn connection(socket: WebSocket, panel: PanelState) {
                     break;
                 }
             }
+            Some(answer) = answers.recv() => {
+                crate::viewers::opened(&answer, &mut open_viewer);
+                if send(&mut sender, &answer).await.is_err() {
+                    break;
+                }
+            }
+            change = chat_changes.recv() => {
+                let event = match change {
+                    Ok(change) => crate::viewers::change(change, open_viewer.as_deref()),
+                    // Lines missed: the card shows them when opened again.
+                    Err(RecvError::Lagged(_)) => None,
+                    Err(RecvError::Closed) => break,
+                };
+                if let Some(event) = event
+                    && send(&mut sender, &event).await.is_err()
+                {
+                    break;
+                }
+            }
             _ = refresh.tick() => {}
         }
     }
@@ -422,7 +459,7 @@ async fn handle(request: PanelRequest, panel: &PanelState) -> Option<PanelEvent>
             // Only the link Twitch gave, never one from the panel.
             match panel.status.login() {
                 LoginStatus::Waiting { url, .. } => {
-                    if let Err(error) = open::that_detached(&url) {
+                    if let Err(error) = panel.desktop.open(&url) {
                         tracing::warn!("couldn't open the browser ({error}); open {url} yourself");
                     }
                 }
@@ -642,6 +679,10 @@ async fn handle(request: PanelRequest, panel: &PanelState) -> Option<PanelEvent>
             panel.activity.skip(id);
             None
         }
+        PanelRequest::PlayNext { id } => {
+            panel.activity.play_next(id);
+            None
+        }
         PanelRequest::ClearHistory => {
             panel.activity.clear_history();
             None
@@ -671,7 +712,7 @@ async fn handle(request: PanelRequest, panel: &PanelState) -> Option<PanelEvent>
             };
             if !found {
                 tracing::warn!(url, ?from, "that link isn't where the panel said; nothing was opened");
-            } else if let Err(error) = open::that_detached(&url) {
+            } else if let Err(error) = panel.desktop.open(&url) {
                 tracing::warn!("couldn't open the browser ({error}); open {url} yourself");
             }
             None
@@ -687,10 +728,14 @@ async fn handle(request: PanelRequest, panel: &PanelState) -> Option<PanelEvent>
                 AppLink::WhatsNew => panel.updates.release_page(),
                 AppLink::Licence => Some(protocol::update::licence_url()),
                 AppLink::Support => Some(protocol::update::SUPPORT_URL.to_string()),
+                AppLink::StreamDeckPlugin => Some(protocol::streamdeck::release_file_url(
+                    &protocol::update::releases(),
+                    crate::update::RUNNING,
+                )),
             };
             match url {
                 Some(url) => {
-                    if let Err(error) = open::that_detached(&url) {
+                    if let Err(error) = panel.desktop.open(&url) {
                         tracing::warn!("couldn't open the browser ({error}); open {url} yourself");
                     }
                 }
@@ -698,9 +743,17 @@ async fn handle(request: PanelRequest, panel: &PanelState) -> Option<PanelEvent>
             }
             None
         }
+        PanelRequest::InstallStreamDeck => {
+            let error = crate::streamdeck::install(&panel.cache, panel.desktop).err();
+            if let Some(error) = &error {
+                tracing::warn!("couldn't install the Stream Deck plugin: {error}");
+            }
+            panel.status.set_stream_deck_install_error(error);
+            None
+        }
         PanelRequest::OpenLogs => {
             let folder = panel.log.folder();
-            if let Err(error) = std::fs::create_dir_all(folder).and_then(|()| open::that_detached(folder)) {
+            if let Err(error) = std::fs::create_dir_all(folder).and_then(|()| panel.desktop.open(folder)) {
                 tracing::warn!("couldn't open the logs folder ({error}); it's {}", folder.display());
             }
             None
@@ -714,6 +767,13 @@ async fn handle(request: PanelRequest, panel: &PanelState) -> Option<PanelEvent>
             panel.emotes.resync();
             None
         }
+        // The connection handles these (`crate::viewers`).
+        PanelRequest::FindViewers { .. }
+        | PanelRequest::OpenViewer { .. }
+        | PanelRequest::OlderViewerLines { .. }
+        | PanelRequest::CloseViewer
+        | PanelRequest::Moderate { .. }
+        | PanelRequest::OpenTwitchCard { .. } => None,
         PanelRequest::Emotes => {
             // Without a chat channel: the globals of Twitch, the only
             // platform so far.

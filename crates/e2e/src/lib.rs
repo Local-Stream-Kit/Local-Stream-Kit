@@ -11,6 +11,9 @@
 //! `lsk.json` under `target/e2e/<test>/`, no Twitch channel and no
 //! emote sources, so nothing goes over the network) and its own browser.
 //! The folder is kept afterwards: `server.log` is there for a failed test.
+//! Servers run with `--no-open`: what the panel asks them to open on this
+//! PC (a link, the logs folder, the Stream Deck plugin) is logged instead
+//! ([`App::wait_logged`]).
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -146,6 +149,7 @@ impl App {
             None => command.env_remove("RUST_LOG"),
         };
         let server = command
+            .arg("--no-open")
             .args(&self.args)
             .current_dir(&self.dir)
             .stdin(Stdio::null())
@@ -165,6 +169,27 @@ impl App {
 
     pub fn log_path(&self) -> PathBuf {
         self.dir.join("server.log")
+    }
+
+    /// The lines of `server.log` since the server last started.
+    pub fn log_lines(&self) -> Vec<String> {
+        let log = std::fs::read(self.log_path()).unwrap_or_default();
+        let log = String::from_utf8_lossy(log.get(self.log_from as usize..).unwrap_or_default());
+        log.lines().map(str::to_string).collect()
+    }
+
+    /// Waits until `count` lines of the log since the server last started
+    /// pass `check`.
+    pub async fn wait_logged(&self, what: &str, count: usize, check: impl Fn(&str) -> bool) {
+        let deadline = Instant::now() + TIMEOUT;
+        while self.log_lines().iter().filter(|line| check(line)).count() < count {
+            assert!(
+                Instant::now() < deadline,
+                "timed out waiting for {what}; see {}",
+                self.log_path().display()
+            );
+            sleep(POLL).await;
+        }
     }
 
     /// Waits until the server code of each of `plugins` is running (it

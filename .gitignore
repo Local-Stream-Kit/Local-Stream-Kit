@@ -16,6 +16,7 @@
 /plugins/
 /lsk_queue.json*
 /lsk_history.json*
+/chat/
 /lsk.v*.json
 /lsk_control.json*
 /lsk_secrets.json*

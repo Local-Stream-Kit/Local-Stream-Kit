@@ -6,6 +6,12 @@ edition.workspace = true
 publish.workspace = true
 license-file.workspace = true
 
+[features]
+# Builds the Stream Deck plugin's file into the exe, for Status's Install
+# (`cargo dist` turns it on). build.rs says where the file is taken from,
+# and reads the plugin's version from its manifest.
+streamdeck = ["dep:serde_json"]
+
 [dependencies]
 protocol.workspace = true
 serde.workspace = true
@@ -23,7 +29,8 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "chrono"] }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 clap = { version = "4.6", features = ["derive"] }
-twitch_api = { version = "0.8", features = ["eventsub", "helix", "reqwest"] }
+# `beta`: Warn Chat User (its endpoints only; guest star events too).
+twitch_api = { version = "0.8", features = ["beta", "eventsub", "helix", "reqwest"] }
 twitch_oauth2 = { version = "0.17", features = ["reqwest"] }
 tokio-tungstenite = { version = "0.29", features = ["rustls-tls-native-roots"] }
 tokio-rustls = { version = "0.26", default-features = false }
@@ -38,3 +45,7 @@ open = "5.3"
 mime_guess = "2"
 wasmtime = { version = "49", default-features = false, features = ["anyhow", "cranelift", "component-model", "runtime", "std", "parallel-compilation"] }
 wasmtime-wasi = { version = "49.0.2", default-features = false, features = ["p2"] }
+
+[build-dependencies]
+# Reads the Stream Deck plugin's version from its manifest (the feature).
+serde_json = { workspace = true, optional = true }

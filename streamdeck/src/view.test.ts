@@ -3,7 +3,7 @@ import { test } from "node:test";
 
 import { parseAddress, webSocketUrl } from "./address.js";
 import { keySvg } from "./keys.js";
-import type { ControlState } from "./protocol.js";
+import { type ControlState, hello } from "./protocol.js";
 import { cardView, effectView, eventView, historyView, muteView, queueView } from "./view.js";
 
 const state: ControlState = {
@@ -32,6 +32,10 @@ test("the address pasted from the panel", () => {
 	assert.ok("problem" in parseAddress("ftp://localhost/?key=a"));
 	const address = { base: "http://localhost:3000", key: "a b" };
 	assert.equal(webSocketUrl(address, "/control/ws"), "ws://localhost:3000/control/ws?key=a+b");
+});
+
+test("the hello says the plugin's version", () => {
+	assert.deepEqual(JSON.parse(hello("0.1.1.0")), { type: "hello", client: "streamdeck", version: "0.1.1.0" });
 });
 
 test("a card key shows whether the card is on, by id", () => {

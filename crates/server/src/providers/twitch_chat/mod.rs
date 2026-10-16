@@ -56,7 +56,7 @@ impl TwitchChat {
 fn eventsub_reports_redemptions(services: &Services) -> bool {
     matches!(
         services.status.login(),
-        LoginStatus::LoggedIn { listening: true, .. } | LoginStatus::TwitchCli { .. }
+        LoginStatus::LoggedIn { listening: true, points: true, .. } | LoginStatus::TwitchCli { .. }
     )
 }
 

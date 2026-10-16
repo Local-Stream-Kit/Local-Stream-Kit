@@ -1,6 +1,7 @@
 //! Shared services: lookups any stage can use, not part of the pipeline flow.
 
 pub mod activity;
+pub mod chat_log;
 pub mod config_store;
 pub mod emotes;
 pub mod image_cache;
@@ -26,4 +27,6 @@ pub struct Services {
     pub activity: Activity,
     /// The pictures and sounds folders, for settings that name a folder.
     pub media: crate::media::MediaFolders,
+    /// Every chat message, for the viewers' cards.
+    pub chat_log: chat_log::ChatLog,
 }

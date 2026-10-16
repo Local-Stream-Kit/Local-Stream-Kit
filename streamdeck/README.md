@@ -25,16 +25,32 @@ app, so nothing is typed.
 
 ## Install
 
+Local Stream Kit has the plugin built in: on **Status → Control API**,
+click **Install** next to Stream Deck, and Stream Deck (on the PC the app runs
+on) asks whether to install it. Each release also has the file,
+`com.localstreamkit.streamdeck.streamDeckPlugin`, beside `lsk.exe`:
+double-click it, and Stream Deck installs it.
+
+Then drag a Local Stream Kit key onto your Stream Deck, and paste the
+**Address** from the same Control API box into the key's **Address**.
+Every key shares it, so it's pasted once.
+
+The plugin has a version of its own, in its manifest (`0.2.0.0`), raised
+only when the plugin changes. It tells the app its version when it
+connects, and Status shows it ("0.2.0 connected"). When the app has a
+newer one built in, Status offers **Update**, which installs it the same
+way. The first plugin, 0.1.0.0,
+doesn't say its version, so Status doesn't show it: Install replaces it.
+
+From the source:
+
 ```bash
 cargo streamdeck
 ```
 
 builds `streamdeck/dist/com.localstreamkit.streamdeck.streamDeckPlugin`
-(it needs Node.js 24). Double-click it, and Stream Deck installs it.
-
-Then drag a Local Stream Kit key onto your Stream Deck, and paste the line
-from Local Stream Kit's **Status → Control API** box ("Stream Deck")
-into the key's **Address**. Every key shares it, so it's pasted once.
+(it needs Node.js 24): the tests, then the file. `cargo dist` builds it
+too, and into the app.
 
 ## Develop
 
@@ -46,7 +62,14 @@ npm ci
 npm run build
 ```
 
-- `npm test`: what keys show (`src/view.ts`), the address, the images.
+- `npm test`: what keys show (`src/view.ts`), the address, the images,
+  the hello.
+- `npm run pack`: builds, then packs the file (`scripts/pack.mjs`): the
+  plugin folder is copied to `packing/` with `LICENSE.md` beside the
+  manifest, so the folder in the repo doesn't change.
+- When you change the plugin, raise `Version` in its manifest: Status
+  offers the update by it, and a release with a changed plugin and the
+  same version is refused.
 - `npm run try -- <address>`: runs the built plugin against a stand-in
   Stream Deck and a running Local Stream Kit, presses keys and checks what
   they show. It switches the first card and the rain, then switches them
@@ -60,7 +83,9 @@ The code:
 
 - `src/plugin.ts` starts it: the actions, the app connection, the settings
   page's messages.
-- `src/app.ts` is the connection to Local Stream Kit.
+- `src/app.ts` is the connection to Local Stream Kit. It says hello with
+  the plugin's version (Stream Deck's, from the manifest) when it
+  connects.
 - `src/actions.ts` holds the kinds of keys.
 - `src/view.ts` and `src/keys.ts` decide what a key shows, and draw it.
 - `src/pi.ts` with `ui/settings.html` is a key's settings page. It's

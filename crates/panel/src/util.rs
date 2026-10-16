@@ -134,17 +134,33 @@ pub fn new_card_id(name: &str, existing: &[Card]) -> String {
 }
 
 /// `text` with the viewers' names in their chat colours (where they
-/// picked one), as on Twitch.
-pub fn with_names(text: &str, names: &[NameColor]) -> Html {
+/// picked one), as on Twitch. With `open_viewer`, a name is a button that
+/// opens the viewer's card.
+pub fn with_names(text: &str, names: &[NameColor], open_viewer: Option<&Callback<NameColor>>) -> Html {
     if names.is_empty() {
         return html! { { text.to_string() } };
     }
     html! {
-        { for split_names(text, names).into_iter().map(|(part, name)| match name {
-            Some(name) => html! {
+        { for split_names(text, names).into_iter().map(|(part, name)| match (name, open_viewer) {
+            (Some(name), Some(open)) => {
+                let onclick = {
+                    let (open, name) = (open.clone(), name.clone());
+                    Callback::from(move |event: MouseEvent| {
+                        // The History entry it's in doesn't open or close.
+                        event.prevent_default();
+                        event.stop_propagation();
+                        open.emit(name.clone());
+                    })
+                };
+                html! {
+                    <button type="button" class="viewer-name" style={format!("color: {}", readable_color(&name.color))}
+                            title={format!("{part}'s card")} {onclick}>{ part }</button>
+                }
+            }
+            (Some(name), None) => html! {
                 <span class="viewer-name" style={format!("color: {}", readable_color(&name.color))}>{ part }</span>
             },
-            None => html! { { part } },
+            (None, _) => html! { { part } },
         }) }
     }
 }
@@ -153,15 +169,20 @@ pub fn with_names(text: &str, names: &[NameColor]) -> Html {
 /// names in their chat colours in the text between. A click on a link
 /// calls `open` with its address instead of following it: the panel is
 /// usually an OBS dock, where it would open inside OBS.
-pub fn with_links(text: &str, names: &[NameColor], open: &Callback<String>) -> Html {
+pub fn with_links(
+    text: &str,
+    names: &[NameColor],
+    open: &Callback<String>,
+    open_viewer: Option<&Callback<NameColor>>,
+) -> Html {
     let links = protocol::links::find(text);
     if links.is_empty() {
-        return with_names(text, names);
+        return with_names(text, names, open_viewer);
     }
     let mut pieces = Vec::with_capacity(links.len() * 2 + 1);
     let mut at = 0;
     for link in links {
-        pieces.push(with_names(&text[at..link.range.start], names));
+        pieces.push(with_names(&text[at..link.range.start], names, open_viewer));
         let onclick = {
             let (open, url) = (open.clone(), link.url.clone());
             Callback::from(move |event: MouseEvent| {
@@ -180,7 +201,7 @@ pub fn with_links(text: &str, names: &[NameColor], open: &Callback<String>) -> H
         });
         at = link.range.end;
     }
-    pieces.push(with_names(&text[at..], names));
+    pieces.push(with_names(&text[at..], names, open_viewer));
     html! { { for pieces } }
 }
 
@@ -225,7 +246,7 @@ fn split_names<'t, 'n>(text: &'t str, names: &'n [NameColor]) -> Vec<(&'t str, O
 
 /// A name colour that reads on the panel's dark background: too dark
 /// ones (navy, black) are mixed with white until they do.
-fn readable_color(color: &str) -> String {
+pub fn readable_color(color: &str) -> String {
     let Some((r, g, b)) = protocol::alert::parse_hex(color) else { return "inherit".into() };
     let luminance = |r: f64, g: f64, b: f64| {
         let linear = |c: f64| {
@@ -289,6 +310,54 @@ pub(crate) fn built_in_plugins() -> protocol::plugin::Catalog {
 }
 
 /// "21:04" today, "9 Oct 21:04" before.
+/// "Today", "Yesterday", "15 Oct", "15 Oct 2025": the day of a time, for
+/// a viewer's log.
+pub fn day(at_ms: u64) -> String {
+    const MONTHS: [&str; 12] =
+        ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    let date = |ms: f64| {
+        let at = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(ms));
+        (at.get_full_year(), at.get_month(), at.get_date())
+    };
+    let now = js_sys::Date::now();
+    let (year, month, day) = date(at_ms as f64);
+    if (year, month, day) == date(now) {
+        "Today".into()
+    } else if (year, month, day) == date(now - 86_400_000.0) {
+        "Yesterday".into()
+    } else if year == date(now).0 {
+        format!("{day} {}", MONTHS[month as usize % 12])
+    } else {
+        format!("{day} {} {year}", MONTHS[month as usize % 12])
+    }
+}
+
+/// "14:05": the time of day.
+pub fn clock(at_ms: u64) -> String {
+    let at = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(at_ms as f64));
+    format!("{:02}:{:02}", at.get_hours(), at.get_minutes())
+}
+
+/// "14 Oct 2025": a date.
+pub fn date(at_ms: u64) -> String {
+    const MONTHS: [&str; 12] =
+        ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    let at = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(at_ms as f64));
+    format!("{} {} {}", at.get_date(), MONTHS[at.get_month() as usize % 12], at.get_full_year())
+}
+
+/// "3 years", "5 months", "2 days", "today": how long ago, roughly.
+pub fn age(ms: u64) -> String {
+    let days = ms / 86_400_000;
+    let plural = |n: u64, one: &str, many: &str| format!("{n} {}", if n == 1 { one } else { many });
+    match days {
+        0 => "under a day".into(),
+        1..31 => plural(days, "day", "days"),
+        31..365 => plural(days / 30, "month", "months"),
+        _ => plural(days / 365, "year", "years"),
+    }
+}
+
 pub fn time(at_ms: u64) -> String {
     const MONTHS: [&str; 12] =
         ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -307,7 +376,7 @@ mod tests {
 
     #[test]
     fn names_in_text() {
-        let name = |name: &str| NameColor { name: name.into(), color: "#ff4500".into() };
+        let name = |name: &str| NameColor { name: name.into(), color: "#ff4500".into(), id: String::new() };
         let names = [name("Al"), name("Bo")];
         let pieces = |text: &str| -> Vec<(String, bool)> {
             split_names(text, &names)

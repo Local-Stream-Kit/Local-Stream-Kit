@@ -1,11 +1,13 @@
 //! Build tasks that take more than one command, run through the aliases in
 //! `.cargo/config.toml`:
 //!
-//! - `cargo dist`: the release overlay, control panel and built-in plugins'
-//!   pages and server code, then the server that embeds them.
+//! - `cargo dist [--no-streamdeck]`: the release overlay, control panel and
+//!   built-in plugins' pages and server code, and the Stream Deck plugin
+//!   (needs Node.js 24; `--no-streamdeck` leaves it out), then the server
+//!   that embeds them.
 //! - `cargo e2e [--rebuild-pages] [filter]`: the control panel's
 //!   end-to-end tests (`crates/e2e`), after building the panel and the
-//!   server they use.
+//!   server they use (with a stand-in Stream Deck plugin, so no Node.js).
 //! - `cargo streamdeck`: the Stream Deck plugin (`streamdeck/`, needs
 //!   Node.js 24), tested and packed into a `.streamDeckPlugin` file.
 //! - `cargo plugin <folder>`: a plugin's server code, written in Rust: the
@@ -40,17 +42,29 @@ const WEB: [(&str, &str); 5] = [
 /// with the plugin folder their `server.wasm` goes into.
 const SERVERS: [(&str, &str); 1] = [("obs", "crates/server/plugins/obs")];
 
+/// The server's feature that builds the Stream Deck plugin's file in, and
+/// the variable that names another file for it than the one
+/// `cargo streamdeck` makes (see `crates/server/build.rs`).
+const STREAMDECK_FEATURE: &str = "streamdeck";
+const STREAMDECK_PLUGIN_VAR: &str = "LSK_STREAMDECK_PLUGIN";
+/// What `cargo e2e` builds in instead: the tests check it's written and
+/// opened, and need no Node.js.
+const STREAMDECK_STAND_IN: &str = "crates/e2e/stand-in.streamDeckPlugin";
+/// The Node.js the Stream Deck plugin is built with (and that Stream Deck
+/// runs it with, as its manifest says).
+const NODE_MAJOR: u32 = 24;
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let result = match args.first().map(String::as_str) {
-        Some("dist") => dist(),
+        Some("dist") => dist(&args[1..]),
         Some("e2e") => e2e(&args[1..]),
         Some("streamdeck") => streamdeck(),
         Some("plugin") if args.len() == 2 => plugin(&PathBuf::from(&args[1])),
         Some("keygen") => keygen(),
         Some("release") => release::release(&workspace_root(), &args[1..]),
         Some("feed") => feed::feed(&args[1..]),
-        _ => Err("usage: cargo dist | cargo e2e [--rebuild-pages] [test name filter] | cargo streamdeck | cargo plugin <folder> | cargo keygen | cargo release <version> [--dry-run] | cargo feed <exe>"
+        _ => Err("usage: cargo dist [--no-streamdeck] | cargo e2e [--rebuild-pages] [test name filter] | cargo streamdeck | cargo plugin <folder> | cargo keygen | cargo release <version> [--dry-run] | cargo feed <exe>"
             .to_string()),
     };
     match result {
@@ -64,27 +78,49 @@ fn main() -> ExitCode {
 
 /// Builds the overlay, the control panel, the Rain, Alerts and Chat
 /// display plugins' pages (into `crates/server/plugins/*/overlay/`) and the
-/// built-in plugins' server code in release mode, then the server. The order is the point: a release server embeds whatever
-/// `crates/overlay/dist/`, `crates/panel/dist/` and `crates/server/plugins/`
-/// hold when it's compiled, which may otherwise be a `trunk watch` debug
-/// build or nothing at all.
-fn dist() -> Result<(), String> {
+/// built-in plugins' server code in release mode, and the Stream Deck
+/// plugin (as `cargo streamdeck` does), then the server. The order is the point: a release server embeds whatever
+/// `crates/overlay/dist/`, `crates/panel/dist/`, `crates/server/plugins/`
+/// and `streamdeck/dist/` hold when it's compiled, which may otherwise be a `trunk watch` debug
+/// build or nothing at all. `--no-streamdeck` leaves the Stream Deck
+/// plugin out (no Node.js needed): Status then links to a release's.
+fn dist(args: &[String]) -> Result<(), String> {
+    let with_streamdeck = match args {
+        [] => true,
+        [flag] if flag == "--no-streamdeck" => false,
+        _ => return Err("usage: cargo dist [--no-streamdeck]".to_string()),
+    };
     let root = workspace_root();
     let exe = target_dir(&root).join("release").join(format!("lsk{}", std::env::consts::EXE_SUFFIX));
     check_replaceable(&exe)?;
+    if with_streamdeck {
+        check_node().map_err(|problem| {
+            format!(
+                "{problem}. cargo dist builds the Stream Deck plugin into the app; \
+                 `cargo dist --no-streamdeck` leaves it out"
+            )
+        })?;
+    }
 
     // Every page, every time: what's shipped is never a skipped build.
     trunk(&root, true, true)?;
     servers(&root)?;
-    run(Command::new(cargo()).args(["build", "--release", "--package", "lsk"]).current_dir(&root))?;
+    let mut build = Command::new(cargo());
+    build.args(["build", "--release", "--package", "lsk"]).env_remove(STREAMDECK_PLUGIN_VAR);
+    if with_streamdeck {
+        streamdeck()?;
+        build.args(["--features", STREAMDECK_FEATURE]);
+    }
+    run(build.current_dir(&root))?;
 
     let bytes = std::fs::metadata(&exe).map_err(|error| format!("{}: {error}", exe.display()))?.len();
+    let included = if with_streamdeck {
+        "overlay, control panel, built-in plugins and the Stream Deck plugin included"
+    } else {
+        "overlay, control panel and built-in plugins included, without the Stream Deck plugin"
+    };
     println!();
-    println!(
-        "Built {} ({:.1} MB), overlay, control panel and built-in plugins included.",
-        exe.display(),
-        bytes as f64 / 1e6
-    );
+    println!("Built {} ({:.1} MB), {included}.", exe.display(), bytes as f64 / 1e6);
     println!("It keeps its settings in lsk.json in the folder it's started in; nothing else is needed.");
     Ok(())
 }
@@ -94,7 +130,8 @@ fn dist() -> Result<(), String> {
 /// arguments filter the tests by name; `--rebuild-pages` runs trunk for
 /// every page even when nothing they're built from changed. The debug
 /// server reads the panel and the overlay from their `dist/` folders at
-/// runtime, so nothing is embedded.
+/// runtime, so nothing is embedded but a stand-in for the Stream Deck
+/// plugin ([`STREAMDECK_STAND_IN`]).
 fn e2e(args: &[String]) -> Result<(), String> {
     let rebuild_pages = args.iter().any(|arg| arg == "--rebuild-pages");
     let filter: Vec<&String> = args.iter().filter(|arg| *arg != "--rebuild-pages").collect();
@@ -104,7 +141,10 @@ fn e2e(args: &[String]) -> Result<(), String> {
 
     trunk(&root, false, rebuild_pages)?;
     servers(&root)?;
-    run(Command::new(cargo()).args(["build", "--package", "lsk"]).current_dir(&root))?;
+    run(Command::new(cargo())
+        .args(["build", "--package", "lsk", "--features", STREAMDECK_FEATURE])
+        .env(STREAMDECK_PLUGIN_VAR, root.join(STREAMDECK_STAND_IN))
+        .current_dir(&root))?;
     // The plugins with server code that the tests install.
     for folder in [
         "examples/plugins/counter",
@@ -276,7 +316,9 @@ fn sync(from: &Path, to: &Path) -> std::io::Result<()> {
 
 /// The Stream Deck plugin: its packages (from the lock file), its tests,
 /// then the `.streamDeckPlugin` file, which installs with a double-click.
+/// Its version is its manifest's own.
 fn streamdeck() -> Result<(), String> {
+    check_node()?;
     let dir = workspace_root().join("streamdeck");
     run(npm().arg("ci").current_dir(&dir))?;
     run(npm().arg("test").current_dir(&dir))?;
@@ -316,6 +358,25 @@ fn plugin(folder: &Path) -> Result<(), String> {
     std::fs::copy(&built, &server).map_err(|error| format!("{}: {error}", built.display()))?;
     println!("Built {}", server.display());
     Ok(())
+}
+
+/// Node.js [`NODE_MAJOR`] or newer is on PATH, or why not.
+fn check_node() -> Result<(), String> {
+    let wanted = format!("the Stream Deck plugin needs Node.js {NODE_MAJOR}");
+    let output = match Command::new("node").arg("--version").output() {
+        Ok(output) if output.status.success() => output,
+        Ok(_) | Err(_) => return Err(format!("{wanted}, and node isn't on PATH")),
+    };
+    let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    match node_major(&version) {
+        Some(major) if major >= NODE_MAJOR => Ok(()),
+        _ => Err(format!("{wanted}, and this is {version}")),
+    }
+}
+
+/// `v24.19.0` → 24.
+fn node_major(version: &str) -> Option<u32> {
+    version.strip_prefix('v')?.split('.').next()?.parse().ok()
 }
 
 /// npm, which is a script on Windows.
@@ -404,6 +465,14 @@ mod tests {
     use super::*;
     use base64::Engine;
     use ring::signature::{ED25519, Ed25519KeyPair, UnparsedPublicKey};
+
+    #[test]
+    fn node_versions() {
+        assert_eq!(node_major("v24.19.0"), Some(24));
+        assert_eq!(node_major("v22.1.0"), Some(22));
+        assert_eq!(node_major("24.1.0"), None);
+        assert_eq!(node_major(""), None);
+    }
 
     #[test]
     fn a_key_pair_signs_what_its_public_half_checks() {

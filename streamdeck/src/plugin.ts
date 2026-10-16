@@ -13,7 +13,8 @@ import type { FromSettingsPage, ToSettingsPage } from "./pi-messages.js";
 
 type GlobalSettings = { address?: string };
 
-const app = new App();
+// The version Stream Deck read from the manifest.
+const app = new App(streamDeck.info.plugin.version);
 const actions = [
 	new CardAction(),
 	new EffectAction(),

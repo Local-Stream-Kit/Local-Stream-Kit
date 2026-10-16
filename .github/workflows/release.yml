@@ -1,6 +1,7 @@
-# A version tag (pushed by `cargo release`) → a draft release with lsk.exe
-# and its signed update feed. The notes are written in the draft, then
-# Publish; until then the app's update check doesn't see it.
+# A version tag (pushed by `cargo release`) → a draft release with lsk.exe,
+# its signed update feed and the Stream Deck plugin. The notes are written
+# in the draft, then Publish; until then the app's update check doesn't
+# see it.
 #
 # Every action is pinned to a full commit SHA, with its version beside it.
 
@@ -62,6 +63,13 @@ jobs:
           if (-not $exe) { throw 'trunk.zip has no trunk.exe' }
           Add-Content $env:GITHUB_PATH $exe.DirectoryName
 
+      # For the Stream Deck plugin, which cargo dist builds (its packages
+      # with `npm ci` in streamdeck/, from the lock file) and builds into
+      # lsk.exe.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+
       # First: the server's unit tests read the built-in plugins' pages and
       # server code, which this builds (they aren't in the repo).
       - name: cargo dist
@@ -71,7 +79,9 @@ jobs:
         run: cargo test --locked -p protocol -p lsk -p panel -p xtask
 
       - name: Clippy
-        run: cargo clippy --locked --workspace --all-targets -- -D warnings
+        run: |
+          cargo clippy --locked --workspace --all-targets -- -D warnings
+          cargo clippy --locked -p lsk --all-targets --features streamdeck -- -D warnings
 
       - name: The update feed, signed
         env:
@@ -86,4 +96,5 @@ jobs:
           gh release create "$GITHUB_REF_NAME" --draft --verify-tag \
             --title "Local Stream Kit ${GITHUB_REF_NAME#v}" \
             --notes-file .github/release-notes.md \
-            target/release/lsk.exe target/release/latest.json target/release/latest.json.sig
+            target/release/lsk.exe target/release/latest.json target/release/latest.json.sig \
+            streamdeck/dist/com.localstreamkit.streamdeck.streamDeckPlugin

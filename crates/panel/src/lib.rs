@@ -72,6 +72,29 @@ impl Panel {
         self.model.dispatch(Action::QueueNoteClosed);
     }
 
+    /// Opens a viewer's card in Activity: by id (a name there, a viewer
+    /// found), else by the name typed.
+    pub fn open_viewer(&self, id: Option<String>, name: String) {
+        let key = id.clone().filter(|id| !id.is_empty()).unwrap_or_else(|| name.trim().to_lowercase());
+        if self.send(PanelRequest::OpenViewer { id, name }) {
+            self.model.dispatch(Action::OpenViewer(key));
+        }
+    }
+
+    pub fn close_viewer(&self) {
+        self.send(PanelRequest::CloseViewer);
+        self.model.dispatch(Action::CloseViewer);
+    }
+
+    /// Does `action` to the open card's viewer.
+    pub fn moderate(&self, action: protocol::viewers::ViewerAction) {
+        let Some(viewer) = &self.model.viewer else { return };
+        let id = viewer.card.id.clone();
+        if self.send(PanelRequest::Moderate { id, action: action.clone() }) {
+            self.model.dispatch(Action::Moderating(action));
+        }
+    }
+
     pub fn undo(&self) {
         self.model.dispatch(Action::Undo);
     }
@@ -231,8 +254,10 @@ fn Header(props: &HeaderProps) -> Html {
     let panel = use_context::<Panel>().expect("panel context");
     let status = &panel.model.status;
     let chat_ok = matches!(status.chat, protocol::panel::ChatStatus::Connected { .. });
-    // Logged out is only chat (logging in is optional): no dot then.
-    let points = match &status.login {
+    // The Twitch login (channel points, follows, hype trains, moderating;
+    // "Points" until 2026-10-16). Logged out is only chat (logging in is
+    // optional): no dot then.
+    let login = match &status.login {
         LoginStatus::Off | LoginStatus::LoggedOut => None,
         LoginStatus::LoggedIn { listening: true, .. } | LoginStatus::TwitchCli { .. } => Some("ok"),
         LoginStatus::Waiting { .. } => Some("warn"),
@@ -259,8 +284,8 @@ fn Header(props: &HeaderProps) -> Html {
                 <div class="dock-status">
                 <a class="dots" href={Route::Status.href()} aria-label="Connection status">
                     <span class="dot-label"><span class={classes!("dot", if chat_ok { "ok" } else { "off" })}></span>{ "Chat" }</span>
-                    if let Some(state) = points {
-                        <span class="dot-label"><span class={classes!("dot", state)}></span>{ "Points" }</span>
+                    if let Some(state) = login {
+                        <span class="dot-label"><span class={classes!("dot", state)}></span>{ "Twitch" }</span>
                     }
                     <span class="dot-label">
                         <span class={classes!("dot", if overlays > 0 { "ok" } else { "off" })}></span>

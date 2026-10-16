@@ -17,8 +17,10 @@ pub mod panel;
 pub mod plugin;
 pub mod sound;
 pub mod speech;
+pub mod streamdeck;
 pub mod text_style;
 pub mod update;
+pub mod viewers;
 
 pub use alert::AlertStyle;
 pub use plugin::PluginCommand;

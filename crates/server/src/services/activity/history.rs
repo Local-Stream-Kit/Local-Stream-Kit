@@ -93,18 +93,16 @@ pub fn describe(signal: &Signal) -> Option<Described<'_>> {
     Some(Described { kind, summary, amount, message: message.filter(|message| !message.is_blank()), kept })
 }
 
-/// The colours the signal's viewers picked for their names in chat, for
-/// the panel. Events from EventSub (rewards, follows) have none.
+/// The signal's viewers' names, for the panel: with the colours they
+/// picked in chat (events from EventSub, rewards and follows, have none),
+/// and their ids, which open their cards.
 pub fn name_colors(signal: &Signal) -> Vec<NameColor> {
     let mut names: Vec<NameColor> = Vec::new();
     for user in signal.people() {
-        let Some(color) = user.color.as_deref().filter(|color| protocol::alert::parse_hex(color).is_some())
-        else {
-            continue;
-        };
+        let color = user.color.as_deref().filter(|color| protocol::alert::parse_hex(color).is_some());
         let name = name(user);
         if !name.is_empty() && !names.iter().any(|known| known.name == name) {
-            names.push(NameColor { name, color: color.to_string() });
+            names.push(NameColor { name, color: color.unwrap_or_default().to_string(), id: user.id.clone() });
         }
     }
     names
@@ -197,8 +195,13 @@ mod tests {
     }
 
     #[test]
-    fn name_colours_where_chat_gave_them() {
+    fn names_with_the_colours_chat_gave_them() {
         let colored = |login: &str, color: &str| User { color: Some(color.into()), ..user(login) };
+        let name = |name: &str, color: &str, id: &str| NameColor {
+            name: name.into(),
+            color: color.into(),
+            id: id.into(),
+        };
         let gift = SignalKind::Membership {
             user: user("r"),
             kind: MembershipKind::Gifted { gifter: Some(colored("g", "#ff4500")), batch_id: None },
@@ -208,12 +211,12 @@ mod tests {
         let names = name_colors(&Signal::new(origin(), gift));
         assert_eq!(
             names,
-            vec![NameColor { name: "G".into(), color: "#ff4500".into() }],
-            "the recipient has none"
+            vec![name("R", "", "id-r"), name("G", "#ff4500", "id-g")],
+            "the recipient has no colour"
         );
         let follow = SignalKind::Follow { user: user("f") };
-        assert!(name_colors(&Signal::new(origin(), follow)).is_empty());
+        assert_eq!(name_colors(&Signal::new(origin(), follow)), [name("F", "", "id-f")]);
         let odd = SignalKind::Raid { from: colored("r", "red; x"), viewers: 3 };
-        assert!(name_colors(&Signal::new(origin(), odd)).is_empty(), "only #rrggbb");
+        assert_eq!(name_colors(&Signal::new(origin(), odd)), [name("R", "", "id-r")], "only #rrggbb");
     }
 }

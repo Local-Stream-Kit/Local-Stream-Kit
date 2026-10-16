@@ -49,6 +49,7 @@ export type QueueAction = "pause" | "resume" | "toggle" | "skip" | "clear";
 /** What the WebSocket sends. The plugin only listens for the state. */
 export type ControlMessage =
 	| { type: "state"; state: ControlState }
+	| { type: "hello"; version: string }
 	| { type: "card"; card: CardState }
 	| { type: "effect"; effect: EffectState }
 	| { type: "queue"; queue: QueueSummary }
@@ -71,6 +72,18 @@ export const paths = {
 	/** Every event in the history seen. */
 	historySeen: "/control/history/seen",
 };
+
+/** How the plugin calls itself in its hello. */
+export const CLIENT = "streamdeck";
+
+/**
+ * Sent on the WebSocket once it's open: which program this is, and its
+ * version (the manifest's, `0.2.0.0`). The app shows it on Status, and
+ * offers an update when the one built into it is newer.
+ */
+export function hello(version: string): string {
+	return JSON.stringify({ type: "hello", client: CLIENT, version });
+}
 
 /** The key goes in this header on web requests (`?key=` on the WebSocket). */
 export const KEY_HEADER = "X-Control-Key";

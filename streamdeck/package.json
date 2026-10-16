@@ -8,7 +8,7 @@
         "build": "rollup -c",
         "watch": "rollup -c -w --watch.onEnd=\"streamdeck restart com.localstreamkit.streamdeck\"",
         "test": "tsc -p tsconfig.test.json && node --test \"test-build/**/*.test.js\"",
-        "pack": "npm run build && streamdeck validate com.localstreamkit.streamdeck.sdPlugin && streamdeck pack com.localstreamkit.streamdeck.sdPlugin --output dist --force",
+        "pack": "npm run build && node scripts/pack.mjs",
         "icons": "node scripts/icons.mjs",
         "try": "node scripts/fake-stream-deck.mjs"
     },

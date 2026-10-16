@@ -140,6 +140,9 @@ pub enum AppLink {
     Licence,
     /// "Support the project".
     Support,
+    /// The Stream Deck plugin's file in this version's release, for a
+    /// build without it built in.
+    StreamDeckPlugin,
 }
 
 #[cfg(test)]

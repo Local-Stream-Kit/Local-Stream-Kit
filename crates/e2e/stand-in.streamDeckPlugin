@@ -1,0 +1,2 @@
+Not the Stream Deck plugin: a stand-in that cargo e2e builds into the
+server, so the tests need no Node.js. Opening it installs nothing.

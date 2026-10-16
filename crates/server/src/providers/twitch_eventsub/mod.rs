@@ -15,6 +15,9 @@
 mod auth;
 mod emotes;
 mod map;
+mod moderation;
+
+pub use moderation::TwitchModeration;
 
 use std::collections::{HashSet, VecDeque};
 use std::path::PathBuf;
@@ -38,7 +41,7 @@ use twitch_api::eventsub::event::websocket::EventsubWebsocketData;
 use twitch_api::eventsub::{Status, Transport};
 use twitch_api::helix::HelixRequestBody;
 use twitch_api::helix::eventsub::CreateEventSubSubscriptionBody;
-use twitch_oauth2::UserToken;
+use twitch_oauth2::{TwitchToken, UserToken};
 
 use crate::model::Input;
 use crate::pipeline::now_ms;
@@ -46,6 +49,7 @@ use crate::providers::Provider;
 use crate::services::Services;
 use crate::services::status::StatusHub;
 use auth::Auth;
+use protocol::config::TwitchPermissions;
 use protocol::panel::LoginStatus;
 
 /// The Client ID of the Twitch app registered for Local Stream Kit, as a
@@ -61,6 +65,9 @@ const WELCOME_TIMEOUT: Duration = Duration::from_secs(10);
 const KEEPALIVE_SLACK: Duration = Duration::from_secs(10);
 /// Twitch asks apps to check their token at least this often.
 const CHECK_LOGIN_EVERY: Duration = Duration::from_secs(60 * 60);
+/// How often the token is refreshed if it's about to run out (it lasts
+/// about 4 hours; refreshed with 10 minutes left).
+const REFRESH_EVERY: Duration = Duration::from_secs(5 * 60);
 const MAX_BACKOFF: Duration = Duration::from_secs(60);
 /// Twitch may send a notification twice; this many recent message ids are
 /// remembered to skip repeats.
@@ -78,6 +85,8 @@ pub enum Server {
         tokens_path: PathBuf,
         /// The chat channel, to warn if the login is for a different one.
         chat_channel: watch::Receiver<String>,
+        /// What the login may do (Status → Twitch's ticks).
+        allowed: watch::Receiver<TwitchPermissions>,
     },
     /// The Twitch CLI's mock server at this address (e.g. `127.0.0.1:8080`).
     TwitchCli { address: String },
@@ -86,9 +95,10 @@ pub enum Server {
 /// What the control panel can ask of the login.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LoginCommand {
-    /// Start logging in (after a cancel or log out).
+    /// Start logging in (after a cancel or log out); logged in, a second
+    /// login for what's ticked, while the first goes on working.
     Start,
-    /// Stop waiting for the current code.
+    /// Stop waiting for the current code (a second login's too).
     Cancel,
     Logout,
 }
@@ -97,6 +107,8 @@ pub struct TwitchEventSub {
     http: reqwest::Client,
     server: Server,
     commands: mpsc::Receiver<LoginCommand>,
+    /// The login's working token, whenever it changes.
+    tokens: watch::Sender<Option<UserToken>>,
 }
 
 impl TwitchEventSub {
@@ -105,7 +117,20 @@ impl TwitchEventSub {
         server: Server,
         commands: mpsc::Receiver<LoginCommand>,
     ) -> TwitchEventSub {
-        TwitchEventSub { http, server, commands }
+        TwitchEventSub { http, server, commands, tokens: watch::channel(None).0 }
+    }
+
+    /// Moderating viewers with the login; none with the Twitch CLI.
+    pub fn moderation(&self) -> Option<TwitchModeration> {
+        match &self.server {
+            Server::Twitch { chat_channel, allowed, .. } => Some(TwitchModeration::new(
+                self.http.clone(),
+                self.tokens.subscribe(),
+                chat_channel.clone(),
+                allowed.clone(),
+            )),
+            Server::TwitchCli { .. } => None,
+        }
     }
 }
 
@@ -117,8 +142,7 @@ enum Backend {
         helix: HelixClient<'static, reqwest::Client>,
         chat_channel: watch::Receiver<String>,
         status: StatusHub,
-        /// The working login, for loading Twitch's emote lists.
-        tokens: watch::Sender<Option<UserToken>>,
+        allowed: watch::Receiver<TwitchPermissions>,
     },
     TwitchCli {
         http: reqwest::Client,
@@ -160,29 +184,44 @@ impl Backend {
     #[allow(deprecated)] // version 1 of the hype train events: the Twitch CLI's
     async fn subscribe(&mut self, session_id: &str) -> anyhow::Result<()> {
         match self {
-            Backend::Twitch { auth, helix, status, tokens, .. } => {
+            Backend::Twitch { auth, helix, status, allowed, .. } => {
                 let token = auth.token().await?;
-                helix
-                    .create_eventsub_subscription(
-                        ChannelPointsCustomRewardRedemptionAddV1::broadcaster_user_id(token.user_id.clone()),
-                        Transport::websocket(session_id),
-                        &token,
-                    )
-                    .await?;
+                let granted = auth::granted(token.scopes());
+                // What's ticked and the login may do.
+                let wanted = allowed.borrow().and(granted);
+                if wanted.channel_points {
+                    helix
+                        .create_eventsub_subscription(
+                            ChannelPointsCustomRewardRedemptionAddV1::broadcaster_user_id(
+                                token.user_id.clone(),
+                            ),
+                            Transport::websocket(session_id),
+                            &token,
+                        )
+                        .await?;
+                }
                 // As the broadcaster, who counts as a moderator of their own
                 // channel.
-                let follows = helix
-                    .create_eventsub_subscription(
-                        ChannelFollowV2::new(token.user_id.clone(), token.user_id.clone()),
-                        Transport::websocket(session_id),
-                        &token,
-                    )
-                    .await;
-                if let Err(error) = &follows {
-                    tracing::warn!("couldn't listen for follows: {error}");
-                }
+                let follows = wanted.follows
+                    && match helix
+                        .create_eventsub_subscription(
+                            ChannelFollowV2::new(token.user_id.clone(), token.user_id.clone()),
+                            Transport::websocket(session_id),
+                            &token,
+                        )
+                        .await
+                    {
+                        Ok(_) => true,
+                        Err(error) => {
+                            tracing::warn!("couldn't listen for follows: {error}");
+                            false
+                        }
+                    };
                 // Version 2: Twitch has withdrawn version 1.
                 let hype_train = async {
+                    if !wanted.hype_train {
+                        return anyhow::Ok(false);
+                    }
                     let id = &token.user_id;
                     let transport = || Transport::websocket(session_id);
                     helix
@@ -206,28 +245,34 @@ impl Backend {
                             &token,
                         )
                         .await?;
-                    anyhow::Ok(())
+                    anyhow::Ok(true)
                 }
-                .await;
-                if let Err(error) = &hype_train {
+                .await
+                .unwrap_or_else(|error| {
                     tracing::warn!("couldn't listen for hype trains: {error}");
-                }
+                    false
+                });
                 status.set_login(LoginStatus::LoggedIn {
                     login: token.login.to_string(),
                     listening: true,
-                    follows: follows.is_ok(),
-                    hype_train: hype_train.is_ok(),
+                    points: wanted.channel_points,
+                    follows,
+                    hype_train,
+                    granted,
                 });
-                tokens.send_replace(Some(token.clone()));
                 // The channel's rewards, for the panel's reward picker.
-                match helix.get_all_custom_rewards(&token.user_id, false, &token).await {
-                    Ok(rewards) => {
-                        let mut titles: Vec<String> =
-                            rewards.into_iter().map(|reward| reward.title).collect();
-                        titles.sort_by_key(|title| title.to_lowercase());
-                        status.set_rewards(titles);
+                if !wanted.channel_points {
+                    status.set_rewards(Vec::new());
+                } else {
+                    match helix.get_all_custom_rewards(&token.user_id, false, &token).await {
+                        Ok(rewards) => {
+                            let mut titles: Vec<String> =
+                                rewards.into_iter().map(|reward| reward.title).collect();
+                            titles.sort_by_key(|title| title.to_lowercase());
+                            status.set_rewards(titles);
+                        }
+                        Err(error) => tracing::warn!("couldn't list the channel's rewards: {error}"),
                     }
-                    Err(error) => tracing::warn!("couldn't list the channel's rewards: {error}"),
                 }
             }
             Backend::TwitchCli { http, address } => {
@@ -290,30 +335,91 @@ impl Backend {
 
     /// The broadcaster disconnected the app from their account.
     fn forget_login(&mut self) {
-        if let Backend::Twitch { auth, tokens, .. } = self {
+        if let Backend::Twitch { auth, .. } = self {
             auth.forget();
-            tokens.send_replace(None);
         }
     }
 
     async fn logout(&mut self) {
-        if let Backend::Twitch { auth, status, tokens, .. } = self {
+        if let Backend::Twitch { auth, status, .. } = self {
             auth.logout().await;
             status.set_rewards(Vec::new());
-            tokens.send_replace(None);
+        }
+    }
+
+    /// Refreshes the token before it runs out.
+    async fn keep_fresh(&mut self) {
+        if let Backend::Twitch { auth, .. } = self {
+            auth.refresh_if_due().await;
+        }
+    }
+
+    /// A second login was approved: the session starts again with it.
+    fn renewed(&mut self, token: UserToken) {
+        if let Backend::Twitch { auth, .. } = self
+            && let Err(error) = auth.renewed(token)
+        {
+            tracing::error!("{error:#}");
+        }
+    }
+
+    /// Whether any event is ticked that the login may listen for: without
+    /// one, there's no EventSub connection (Twitch closes one without
+    /// subscriptions).
+    fn wants_events(&self) -> bool {
+        match self {
+            Backend::Twitch { auth, allowed, .. } => {
+                auth.granted().is_some_and(|granted| allowed.borrow().and(granted).any_events())
+            }
+            Backend::TwitchCli { .. } => true,
+        }
+    }
+
+    /// Logged in with no event to listen for: the login is kept fresh and
+    /// checked, for the viewers' cards, until the session is interrupted
+    /// (a tick changed) or the login stops working.
+    async fn idle(&mut self) -> anyhow::Result<SessionEnd> {
+        if let Backend::Twitch { auth, status, .. } = self
+            && let (Some(granted), LoginStatus::LoggedIn { login, .. }) = (auth.granted(), status.login())
+        {
+            status.set_login(LoginStatus::LoggedIn {
+                login,
+                listening: true,
+                points: false,
+                follows: false,
+                hype_train: false,
+                granted,
+            });
+            status.set_rewards(Vec::new());
+        }
+        let mut check =
+            tokio::time::interval_at(tokio::time::Instant::now() + CHECK_LOGIN_EVERY, CHECK_LOGIN_EVERY);
+        let mut refresh =
+            tokio::time::interval_at(tokio::time::Instant::now() + REFRESH_EVERY, REFRESH_EVERY);
+        loop {
+            tokio::select! {
+                _ = check.tick() => {
+                    if !self.check().await {
+                        bail!("the Twitch login is no longer valid");
+                    }
+                }
+                _ = refresh.tick() => self.keep_fresh().await,
+            }
         }
     }
 
     /// The connection dropped: not listening until it's back.
     fn disconnected(&mut self) {
         if let Backend::Twitch { status, .. } = self
-            && let LoginStatus::LoggedIn { login, listening: true, .. } = status.login()
+            && let LoginStatus::LoggedIn { login, listening: true, granted, .. } = status.login()
         {
             status.set_login(LoginStatus::LoggedIn {
                 login,
                 listening: false,
+                points: false,
                 follows: false,
                 hype_train: false,
+                granted,
             });
         }
     }
@@ -322,6 +428,10 @@ impl Backend {
 enum Interrupted {
     Ended(anyhow::Result<SessionEnd>),
     Command(Option<LoginCommand>),
+    /// A second login was approved: the session starts again with it.
+    Renewed(UserToken),
+    /// A tick changed: the session subscribes again.
+    Allowed,
 }
 
 enum SessionEnd {
@@ -331,7 +441,7 @@ enum SessionEnd {
 
 impl Provider for TwitchEventSub {
     fn spawn(self: Box<Self>, inputs: mpsc::Sender<Input>, services: Services) -> JoinHandle<()> {
-        let TwitchEventSub { http, server, mut commands } = *self;
+        let TwitchEventSub { http, server, mut commands, tokens } = *self;
         tokio::spawn(async move {
             if CLIENT_ID.is_empty() {
                 tracing::error!(
@@ -347,16 +457,25 @@ impl Provider for TwitchEventSub {
                 Server::Twitch { tokens_path, .. } => tokens_path.exists(),
                 Server::TwitchCli { .. } => true,
             };
+            // The ticks, watched for changes (none with the Twitch CLI).
+            let mut ticks = None;
             let mut backend = match server {
-                Server::Twitch { tokens_path, chat_channel } => {
-                    let (tokens, token) = watch::channel(None);
-                    emotes::spawn(http.clone(), services.emotes.clone(), token);
+                Server::Twitch { tokens_path, chat_channel, allowed } => {
+                    emotes::spawn(http.clone(), services.emotes.clone(), tokens.subscribe());
+                    ticks = Some(allowed.clone());
                     Backend::Twitch {
-                        auth: Auth::new(http.clone(), CLIENT_ID, tokens_path, status.clone()),
+                        auth: Auth::new(
+                            http.clone(),
+                            CLIENT_ID,
+                            tokens_path,
+                            status.clone(),
+                            tokens,
+                            allowed.clone(),
+                        ),
                         helix: HelixClient::with_client(http.clone()),
                         chat_channel,
                         status: status.clone(),
-                        tokens,
+                        allowed,
                     }
                 }
                 Server::TwitchCli { address } => {
@@ -374,8 +493,15 @@ impl Provider for TwitchEventSub {
             // Logged out or cancelled from the panel (or never logged in):
             // wait to be asked.
             let mut paused = !saved;
+            // A second login waiting for approval (more ticked than the
+            // login has), while the first goes on working.
+            let mut renewal: Option<JoinHandle<anyhow::Result<UserToken>>> = None;
             loop {
                 if paused {
+                    if let Some(renewing) = renewal.take() {
+                        renewing.abort();
+                        status.set_renewal(None);
+                    }
                     status.set_login(LoginStatus::LoggedOut);
                     loop {
                         match commands.recv().await {
@@ -387,9 +513,47 @@ impl Provider for TwitchEventSub {
                     paused = false;
                 }
                 let mut subscribed = false;
-                let interrupted = tokio::select! {
-                    result = session(&mut backend, &inputs, &mut seen, &mut trains, &mut subscribed) => Interrupted::Ended(result),
-                    command = commands.recv() => Interrupted::Command(command),
+                let interrupted = {
+                    let running = session(&mut backend, &inputs, &mut seen, &mut trains, &mut subscribed);
+                    tokio::pin!(running);
+                    loop {
+                        tokio::select! {
+                            result = &mut running => break Interrupted::Ended(result),
+                            command = commands.recv() => match command {
+                                // Logged in: a second login, for what's ticked.
+                                Some(LoginCommand::Start)
+                                    if matches!(status.login(), LoginStatus::LoggedIn { .. }) =>
+                                {
+                                    if let (None, Some(ticks)) = (&renewal, &ticks) {
+                                        let ask = auth::renewal(http.clone(), CLIENT_ID, status.clone(), *ticks.borrow());
+                                        renewal = Some(tokio::spawn(ask));
+                                    }
+                                }
+                                Some(LoginCommand::Cancel) if renewal.is_some() => {
+                                    if let Some(renewing) = renewal.take() {
+                                        renewing.abort();
+                                    }
+                                    status.set_renewal(None);
+                                }
+                                other => break Interrupted::Command(other),
+                            },
+                            done = async { renewal.as_mut().expect("a renewal").await }, if renewal.is_some() => {
+                                renewal = None;
+                                match done {
+                                    Ok(Ok(token)) => break Interrupted::Renewed(token),
+                                    Ok(Err(error)) => tracing::warn!("{error:#}"),
+                                    Err(_) => {} // cancelled
+                                }
+                            }
+                            changed = async { ticks.as_mut().expect("ticks").changed().await }, if ticks.is_some() => {
+                                if changed.is_err() {
+                                    ticks = None;
+                                } else {
+                                    break Interrupted::Allowed;
+                                }
+                            }
+                        }
+                    }
                 };
                 backend.disconnected();
                 match interrupted {
@@ -397,7 +561,16 @@ impl Provider for TwitchEventSub {
                     Interrupted::Ended(Err(error)) => {
                         tracing::warn!("Twitch EventSub connection lost: {error:#}")
                     }
+                    Interrupted::Renewed(token) => {
+                        backend.renewed(token);
+                        continue;
+                    }
+                    Interrupted::Allowed => continue,
                     Interrupted::Command(Some(LoginCommand::Logout)) => {
+                        if let Some(renewing) = renewal.take() {
+                            renewing.abort();
+                            status.set_renewal(None);
+                        }
                         backend.logout().await;
                         paused = true;
                         continue;
@@ -432,6 +605,11 @@ async fn session(
     subscribed: &mut bool,
 ) -> anyhow::Result<SessionEnd> {
     let channel = backend.prepare().await?;
+    if !backend.wants_events() {
+        tracing::info!(channel, "logged in to Twitch; no events ticked to listen for");
+        *subscribed = true;
+        return backend.idle().await;
+    }
     let (socket, keepalive) = connect(&backend.websocket_url()).await?;
     backend.subscribe(&socket.session_id).await.context("couldn't subscribe to channel point redemptions")?;
     tracing::info!(channel, "listening for channel point redemptions, follows and hype trains");
@@ -457,6 +635,7 @@ async fn listen(
     let mut old: Option<Draining> = None;
     let mut check =
         tokio::time::interval_at(tokio::time::Instant::now() + CHECK_LOGIN_EVERY, CHECK_LOGIN_EVERY);
+    let mut refresh = tokio::time::interval_at(tokio::time::Instant::now() + REFRESH_EVERY, REFRESH_EVERY);
     loop {
         tokio::select! {
             frame = tokio::time::timeout(keepalive + KEEPALIVE_SLACK, socket.stream.next()) => {
@@ -499,6 +678,7 @@ async fn listen(
                     bail!("the Twitch login is no longer valid");
                 }
             }
+            _ = refresh.tick() => backend.keep_fresh().await,
         }
     }
 }

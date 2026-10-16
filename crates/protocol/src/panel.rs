@@ -129,6 +129,10 @@ pub enum PanelRequest {
     ///
     /// [`QueueItem::id`]: crate::activity::QueueItem::id
     SkipItem { id: u64 },
+    /// Moves a waiting queue item to the front, by its id, so it plays
+    /// once what's on stage ends. One that's gone already, or on stage,
+    /// is left alone, as with [`PanelRequest::SkipItem`].
+    PlayNext { id: u64 },
     /// Forgets the whole history (the queue isn't touched).
     ClearHistory,
     /// Moves the history's seen marker: under entry `up_to` (it and every
@@ -177,6 +181,34 @@ pub enum PanelRequest {
     /// Opens one of the app's pages (the release's, the licence, support)
     /// in the default browser of the PC the app runs on, as `OpenLink`.
     OpenAppLink { link: crate::update::AppLink },
+    /// Writes the Stream Deck plugin built into the app to the cache folder
+    /// and opens it on the PC the app runs on, so Stream Deck installs it
+    /// (or updates the one it has). A download wouldn't work in an OBS
+    /// dock. A failure is in `Status`'s `stream_deck`.
+    InstallStreamDeck,
+    /// The viewers the chat log has seen whose name has `text` in it
+    /// (Find a viewer); answered with `ViewersFound`.
+    FindViewers { text: String },
+    /// Opens a viewer's card: by id (a name in Activity, a viewer found),
+    /// else by name (typed). Answered with `Viewer`, then `ViewerInfo` once
+    /// Twitch has answered; or with `ViewerMissing`. While it's open, this
+    /// panel gets their new log lines (`ViewerLine`).
+    OpenViewer {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        id: Option<String>,
+        name: String,
+    },
+    /// The open card's log lines before the first `before` (its `older`);
+    /// answered with `ViewerOlder`.
+    OlderViewerLines { id: String, before: usize },
+    /// The card was closed: no more of its lines.
+    CloseViewer,
+    /// Does something to a viewer (timeout, ban, …); answered with
+    /// `Moderated`, then a new `ViewerInfo`.
+    Moderate { id: String, action: crate::viewers::ViewerAction },
+    /// Opens Twitch's own viewer card for `login`, in the chat's channel, in
+    /// the PC's browser (as `OpenLink`): all of their messages there.
+    OpenTwitchCard { login: String },
 }
 
 /// Where a link the panel opens is (`PanelRequest::OpenLink`).
@@ -313,6 +345,54 @@ pub enum PanelEvent {
             std::collections::BTreeMap<String, Vec<crate::plugin::Choice>>,
         >,
     },
+    /// The viewers whose name has `text` in it, the most recently seen
+    /// first (at most [`FOUND_LIMIT`](crate::viewers::FOUND_LIMIT)).
+    ViewersFound {
+        text: String,
+        viewers: Vec<crate::viewers::FoundViewer>,
+    },
+    /// A viewer's card (`OpenViewer`).
+    Viewer {
+        card: crate::viewers::ViewerCard,
+    },
+    /// No card for `name`: why, for people.
+    ViewerMissing {
+        name: String,
+        problem: String,
+    },
+    /// What Twitch says about the viewer with card `id`; or why it can't be
+    /// asked.
+    ViewerInfo {
+        id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        info: Option<crate::viewers::ViewerInfo>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        problem: Option<String>,
+    },
+    /// Older lines of card `id`'s log (`OlderViewerLines`), oldest first,
+    /// and how many come before them.
+    ViewerOlder {
+        id: String,
+        lines: Vec<crate::viewers::LogLine>,
+        older: usize,
+    },
+    /// A new line in the open card's log.
+    ViewerLine {
+        id: String,
+        line: crate::viewers::LogLine,
+    },
+    /// One of the open card's messages was taken out of the chat.
+    ViewerMessageDeleted {
+        id: String,
+        message: String,
+    },
+    /// What came of a `Moderate`: `problem` says why it didn't happen.
+    Moderated {
+        id: String,
+        action: crate::viewers::ViewerAction,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        problem: Option<String>,
+    },
 }
 
 /// A folder in the pictures (sounds) folder, with its files (sorted
@@ -369,6 +449,22 @@ pub struct Status {
     /// The update check and download.
     #[serde(default)]
     pub update: crate::update::UpdateStatus,
+    /// The Stream Deck plugin: built in or not, and the ones connected.
+    #[serde(default)]
+    pub stream_deck: crate::streamdeck::StreamDeckStatus,
+    /// A second login waiting for approval while the current one goes on
+    /// working (more permissions ticked; 2026-10-16).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub renewal: Option<LoginCode>,
+}
+
+/// A login's device code: where to approve it, and until when it works.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LoginCode {
+    pub url: String,
+    pub code: String,
+    /// Unix ms when the code stops working (a new one follows).
+    pub expires_at_ms: u64,
 }
 
 /// The log, for the Status page.
@@ -428,15 +524,20 @@ pub enum LoginStatus {
         /// Why a login is needed, e.g. the saved one stopped working.
         reason: Option<String>,
     },
-    /// Logged in; `listening` once the redemption subscription is up, and
-    /// `follows` and `hype_train` once those are too (Twitch can refuse
-    /// either alone).
+    /// Logged in; `listening` once its EventSub connection is up (or not
+    /// needed: no event ticked), `points` once the redemption subscription
+    /// is, and `follows` and `hype_train` once those are too (Twitch can
+    /// refuse either alone). `granted`: what the login's scopes allow.
     LoggedIn {
         login: String,
         listening: bool,
+        #[serde(default)]
+        points: bool,
         follows: bool,
         #[serde(default)]
         hype_train: bool,
+        #[serde(default = "crate::config::TwitchPermissions::all")]
+        granted: crate::config::TwitchPermissions,
     },
     /// Using the Twitch CLI's mock server instead of Twitch.
     TwitchCli { address: String },
@@ -558,5 +659,9 @@ mod tests {
         assert_eq!(serde_json::to_value(&waiting).unwrap()["state"], "waiting");
         let skip = serde_json::to_value(PanelRequest::SkipItem { id: 7 }).unwrap();
         assert_eq!(skip, serde_json::json!({ "type": "skip_item", "id": 7 }));
+        let next = serde_json::to_value(PanelRequest::PlayNext { id: 7 }).unwrap();
+        assert_eq!(next, serde_json::json!({ "type": "play_next", "id": 7 }));
+        let open = serde_json::to_value(PanelRequest::OpenViewer { id: None, name: "Mossy".into() }).unwrap();
+        assert_eq!(open, serde_json::json!({ "type": "open_viewer", "name": "Mossy" }));
     }
 }

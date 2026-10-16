@@ -52,11 +52,16 @@ pub struct QueueItem {
 
 /// A viewer's name as it reads in a summary, and the colour they picked
 /// for it in chat (`#rrggbb`). Only events that come through chat have one:
-/// EventSub (rewards, follows) doesn't send it.
+/// EventSub (rewards, follows) doesn't send it, and those names have an
+/// empty colour (since 2026-10-16; only coloured names were kept before).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NameColor {
     pub name: String,
     pub color: String,
+    /// The viewer's platform user id, which opens their card; empty in
+    /// entries from before 2026-10-16 (the card is found by name then).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub id: String,
 }
 
 /// What a queue item came from, as far as clearing goes: a kind of event
@@ -216,6 +221,19 @@ pub enum Skipped {
     /// It was on stage: it ended.
     OnStage,
     /// It was waiting: it was dropped.
+    Waiting,
+    /// It wasn't in the queue any more: nothing changed.
+    Gone,
+}
+
+/// What moving one item to play next did (the panel's ⤒, the control
+/// API's `/control/items/{id}/next`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Moved {
+    /// It was playing already: nothing changed.
+    OnStage,
+    /// It was waiting: it plays next, once what's on stage ends.
     Waiting,
     /// It wasn't in the queue any more: nothing changed.
     Gone,

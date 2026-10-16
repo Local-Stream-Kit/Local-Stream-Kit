@@ -1,10 +1,11 @@
 /**
  * The connection to Local Stream Kit: its state over the control API's
  * WebSocket (sent on connecting and on every change), and presses as web
- * requests, so each gets its own answer.
+ * requests, so each gets its own answer. On connecting, the plugin says
+ * its version, for the app's Status.
  */
 import { type Address, parseAddress, webSocketUrl } from "./address.js";
-import { CONTROL_VERSION, type ControlMessage, type ControlState, KEY_HEADER, paths } from "./protocol.js";
+import { CONTROL_VERSION, type ControlMessage, type ControlState, hello, KEY_HEADER, paths } from "./protocol.js";
 import type { Connection } from "./view.js";
 
 /** Waits before trying again, growing to the last. */
@@ -27,6 +28,9 @@ export class App {
 	state: ControlState | undefined;
 	/** Why the connection is what it is, for the settings page. */
 	problem = "";
+
+	/** `version`: the plugin's, as its manifest says (`0.2.0.0`). */
+	constructor(readonly version: string) {}
 
 	/** Called whenever the connection or the state changes. */
 	onChange(listener: () => void): void {
@@ -77,6 +81,7 @@ export class App {
 			if (!current()) return;
 			opened = true;
 			this.#attempt = 0;
+			socket.send(hello(this.version));
 		});
 		socket.addEventListener("message", (event) => {
 			if (!current() || typeof event.data !== "string") return;

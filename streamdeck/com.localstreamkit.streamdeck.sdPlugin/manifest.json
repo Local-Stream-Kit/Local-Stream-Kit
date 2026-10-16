@@ -1,6 +1,6 @@
 {
 	"Name": "Local Stream Kit",
-	"Version": "0.1.0.0",
+	"Version": "0.2.0.0",
 	"Author": "Local Stream Kit",
 	"Description": "Switch Local Stream Kit's cards and effects, run its alert queue, fire Custom events and mark its history seen, with keys that show what's on.",
 	"Category": "Local Stream Kit",

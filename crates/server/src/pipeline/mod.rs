@@ -566,6 +566,7 @@ pub async fn run(
                 let Some(input) = input else { break };
                 guarded("an input", || {
                     services.emotes.observe(&input);
+                    services.chat_log.observe(&input);
                     if let Some(recorder) = &mut recorder {
                         recorder.record(&input);
                     }
@@ -808,6 +809,7 @@ mod tests {
             speech,
             activity: activity.clone(),
             media: Default::default(),
+            chat_log: crate::services::chat_log::ChatLog::off(),
         };
         let (_tests, tests) = mpsc::channel(1);
         let (_replays, replays) = mpsc::channel(1);

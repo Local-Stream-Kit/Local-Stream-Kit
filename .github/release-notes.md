@@ -18,6 +18,14 @@ It isn't code-signed yet, so Windows may warn you the first time:
 - Windows may say it protected your PC: choose **More info**, then
   **Run anyway**.
 
+### Stream Deck plugin
+
+`lsk.exe` has it built in: in the app, **Status → Control API → Install
+in Stream Deck**. It's here too:
+`com.localstreamkit.streamdeck.streamDeckPlugin`; open it, and Stream
+Deck installs it. When an older one is connected, Status offers
+**Update**.
+
 `latest.json` and `latest.json.sig` are for the app's update check.
 
 ## Licence

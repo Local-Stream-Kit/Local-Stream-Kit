@@ -77,10 +77,14 @@ impl Mapper {
                 }
                 None => Vec::new(),
             },
-            // With a target, a ban or timeout; without, the whole chat.
+            // With a target, a ban or timeout (`ban-duration`, in seconds);
+            // without, the whole chat.
             "CLEARCHAT" => {
                 let moderation = match message.tag("target-user-id") {
-                    Some(user_id) => Moderation::UserCleared { user_id: user_id.to_string() },
+                    Some(user_id) => Moderation::UserCleared {
+                        user_id: user_id.to_string(),
+                        timeout_secs: message.tag("ban-duration").and_then(|secs| secs.parse().ok()),
+                    },
                     None => Moderation::ChatCleared,
                 };
                 vec![input(InputKind::Moderation(moderation))]
@@ -542,11 +546,23 @@ mod tests {
             })
             .collect();
         assert_eq!(cleared.len(), 6, "timeouts");
-        assert_eq!(cleared[0], Moderation::UserCleared { user_id: "1000032".into() });
+        assert_eq!(
+            cleared[0],
+            Moderation::UserCleared { user_id: "1000032".into(), timeout_secs: Some(300) }
+        );
+        assert_eq!(
+            cleared[2],
+            Moderation::UserCleared { user_id: "1000034".into(), timeout_secs: Some(10_800) }
+        );
         let map = |line: &str| Mapper::new().map(&parse_line(line).unwrap(), 0).remove(0).kind;
         assert_eq!(
             map("@room-id=1;tmi-sent-ts=1 :tmi.twitch.tv CLEARCHAT #chan"),
             InputKind::Moderation(Moderation::ChatCleared)
+        );
+        // A ban: a timeout without its length.
+        assert_eq!(
+            map("@room-id=1;target-user-id=9;tmi-sent-ts=1 :tmi.twitch.tv CLEARCHAT #chan :viewer"),
+            InputKind::Moderation(Moderation::UserCleared { user_id: "9".into(), timeout_secs: None })
         );
         assert_eq!(
             map("@login=a;room-id=1;target-msg-id=m1;tmi-sent-ts=1 :tmi.twitch.tv CLEARMSG #chan :bad words"),

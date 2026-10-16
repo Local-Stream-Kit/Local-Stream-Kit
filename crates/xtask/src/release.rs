@@ -10,6 +10,9 @@
 //! The internal docs are the project's own notes: every Markdown file in
 //! the repo's root and in `docs/` except the ones in [`PUBLIC_ROOT`] and
 //! [`PUBLIC_DOCS`]. A new doc is internal until it's added there.
+//!
+//! The Stream Deck plugin has a version of its own, raised by hand: a
+//! release where the plugin changed but its version didn't is refused.
 
 use std::collections::BTreeSet;
 use std::ffi::OsStr;
@@ -29,6 +32,9 @@ const PUSH_REFSPEC: &str = "refs/heads/release:refs/heads/main";
 
 /// The branch with one commit per release: the public repo's `main`.
 const RELEASE: &str = "refs/heads/release";
+
+/// The Stream Deck plugin's manifest, whose `Version` is the plugin's own.
+const STREAMDECK_MANIFEST: &str = "streamdeck/com.localstreamkit.streamdeck.sdPlugin/manifest.json";
 
 /// Runs `cargo release`: `args` are the version and `--dry-run`.
 pub fn release(root: &Path, args: &[String]) -> Result<(), String> {
@@ -186,6 +192,28 @@ impl Plan {
             let tree = git.run_with(&["write-tree"], None, &env)?;
             git.run(&["commit-tree", &tree, "-p", &head, "-m", &format!("Version {version}")])?
         };
+        if let Some(parent) = &parent {
+            let changed = git.run(&["diff", "--name-only", parent, &version_commit, "--", "streamdeck/"])?;
+            let changed: Vec<&str> = changed.lines().filter(|path| in_streamdeck_plugin(path)).collect();
+            let plugin_version = |commit: &str| {
+                let manifest = git.run_bytes(
+                    &["cat-file", "blob", &format!("{commit}:{STREAMDECK_MANIFEST}")],
+                    None,
+                    &[],
+                );
+                let manifest: serde_json::Value = serde_json::from_slice(&manifest.ok()?).ok()?;
+                manifest["Version"].as_str().map(str::to_string)
+            };
+            if !changed.is_empty()
+                && let Some(problem) = unbumped_plugin(
+                    &changed,
+                    plugin_version(parent).as_deref(),
+                    plugin_version(&version_commit).as_deref(),
+                )
+            {
+                return Err(problem);
+            }
+        }
 
         let mut public = Vec::new();
         let mut internal = Vec::new();
@@ -354,6 +382,39 @@ fn parse_version(version: &str) -> Result<semver::Version, String> {
         ));
     }
     Ok(parsed)
+}
+
+/// Whether a change to `path` changes the Stream Deck plugin people
+/// install (its code, files, packages, or how it's built and packed), so
+/// it needs a new version: everything under `streamdeck/` but its README,
+/// its tests and the scripts that aren't part of it.
+fn in_streamdeck_plugin(path: &str) -> bool {
+    let Some(rest) = path.strip_prefix("streamdeck/") else { return false };
+    let not_in_it = rest == "README.md"
+        || rest == ".gitignore"
+        || rest == "tsconfig.test.json"
+        || rest.ends_with(".test.ts")
+        || (rest.starts_with("scripts/") && rest != "scripts/pack.mjs");
+    !not_in_it
+}
+
+/// Why a release can't go out: the Stream Deck plugin's files `changed`
+/// since the last release, whose plugin was version `last`, but its version
+/// (`now`) isn't newer. None when there was no plugin before.
+fn unbumped_plugin(changed: &[&str], last: Option<&str>, now: Option<&str>) -> Option<String> {
+    let last = last?;
+    if now.is_some_and(|now| protocol::streamdeck::is_older(last, now)) {
+        return None;
+    }
+    let mut files = changed.iter().take(5).copied().collect::<Vec<_>>().join(", ");
+    if changed.len() > 5 {
+        files.push_str(", …");
+    }
+    Some(format!(
+        "the Stream Deck plugin changed since the last release ({files}), but its version is {} (it was \
+         {last}): raise Version in {STREAMDECK_MANIFEST}, so Status offers the update",
+        now.unwrap_or("missing")
+    ))
 }
 
 /// The remote whose only push refspec is [`PUSH_REFSPEC`].
@@ -674,16 +735,48 @@ mod tests {
 
     /// The release workflow starts each draft's notes from
     /// `.github/release-notes.md`: whoever downloads the exe gets the
-    /// licence and its `Required Notice:` line there.
+    /// licence and its `Required Notice:` line there. They name the Stream
+    /// Deck plugin's file, which the workflow attaches.
     #[test]
     fn the_release_notes_have_the_licence() {
         let notes = include_str!("../../../.github/release-notes.md");
+        assert!(notes.contains(protocol::streamdeck::PLUGIN_FILE));
+        let workflow = include_str!("../../../.github/workflows/release.yml");
+        assert!(workflow.contains(&format!("streamdeck/dist/{}", protocol::streamdeck::PLUGIN_FILE)));
         assert!(notes.lines().any(|line| line == protocol::update::REQUIRED_NOTICE));
         assert!(notes.contains(&format!(
             "[{}]({})",
             protocol::update::LICENCE,
             protocol::update::licence_url()
         )));
+    }
+
+    #[test]
+    fn the_stream_deck_plugins_own_files() {
+        for path in [
+            "streamdeck/src/app.ts",
+            "streamdeck/package-lock.json",
+            "streamdeck/rollup.config.mjs",
+            "streamdeck/scripts/pack.mjs",
+            "streamdeck/com.localstreamkit.streamdeck.sdPlugin/imgs/plugin.png",
+        ] {
+            assert!(in_streamdeck_plugin(path), "{path}");
+        }
+        for path in [
+            "streamdeck/README.md",
+            "streamdeck/src/view.test.ts",
+            "streamdeck/tsconfig.test.json",
+            "streamdeck/scripts/fake-stream-deck.mjs",
+            "crates/server/src/streamdeck.rs",
+        ] {
+            assert!(!in_streamdeck_plugin(path), "{path}");
+        }
+        let changed = ["streamdeck/src/app.ts"];
+        assert!(unbumped_plugin(&changed, Some("0.2.0.0"), Some("0.2.1.0")).is_none());
+        let problem = unbumped_plugin(&changed, Some("0.2.0.0"), Some("0.2.0.0")).unwrap();
+        assert!(problem.contains("streamdeck/src/app.ts") && problem.contains("raise Version"), "{problem}");
+        assert!(unbumped_plugin(&changed, Some("0.2.0.0"), None).is_some());
+        assert!(unbumped_plugin(&changed, None, Some("0.1.0.0")).is_none(), "no plugin before");
     }
 
     #[test]
@@ -796,6 +889,8 @@ mod tests {
              editing.\nversion = 4\n\n[[package]]\nname = \"a\"\nversion = \"0.1.0\"\n",
         );
         repo.write("README.md", "# A\n");
+        repo.write(STREAMDECK_MANIFEST, "{ \"Version\": \"0.1.0.0\" }\n");
+        repo.write("streamdeck/src/plugin.ts", "// The plugin.\n");
         repo.write("NOTES.md", "internal\n");
         repo.write("docs/design.md", "internal\n");
         repo.write("docs/writing-a-plugin.md", "public\n");
@@ -823,7 +918,10 @@ mod tests {
         assert_eq!(repo.git("public.git", &["log", "--format=%s %P", "main"]), "Local Stream Kit 0.1.0");
         assert_eq!(
             repo.git("public.git", &["ls-tree", "-r", "--name-only", "main"]),
-            "Cargo.lock\nCargo.toml\nREADME.md\ncrates/a/Cargo.toml\ncrates/a/src/lib.rs\ndocs/writing-a-plugin.md"
+            format!(
+                "Cargo.lock\nCargo.toml\nREADME.md\ncrates/a/Cargo.toml\ncrates/a/src/lib.rs\ndocs/writing-a-plugin.md\n\
+                 {STREAMDECK_MANIFEST}\nstreamdeck/src/plugin.ts"
+            )
         );
         assert_eq!(repo.git("work", &["log", "--format=%s", "main"]), "Start", "no version commit");
         assert_eq!(repo.git("work", &["status", "--porcelain"]), "");
@@ -839,6 +937,13 @@ mod tests {
         assert!(error.contains("crates/a/src/lib.rs:1: names NOTES.md"), "{error}");
         repo.write("crates/a/src/lib.rs", "//! A crate.\n");
         repo.git("work", &["commit", "-q", "-am", "No pointer"]);
+        // The plugin changed: its version must go up.
+        repo.write("streamdeck/src/plugin.ts", "// The plugin, changed.\n");
+        repo.git("work", &["commit", "-q", "-am", "Plugin"]);
+        let error = repo.release(&["0.2.0"]).unwrap_err();
+        assert!(error.contains("its version is 0.1.0.0"), "{error}");
+        repo.write(STREAMDECK_MANIFEST, "{ \"Version\": \"0.1.1.0\" }\n");
+        repo.git("work", &["commit", "-q", "-am", "Plugin 0.1.1.0"]);
 
         // The second: a version commit on main, a release on top of the first.
         repo.release(&["0.2.0"]).unwrap();

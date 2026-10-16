@@ -5,6 +5,7 @@
 // settings page, and checks what the plugin draws and asks for. The card
 // and effect it presses are switched back afterwards.
 import { spawn } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 
@@ -61,7 +62,8 @@ const payload = (k) => ({ settings: k.settings, coordinates: k.coordinates, cont
 
 const info = {
 	application: { font: "Segoe UI", language: "en", platform: "windows", platformVersion: "10.0.26200", version: "7.5.1.22901" },
-	plugin: { uuid: UUID, version: "0.1.0.0" },
+	// As Stream Deck does, from the manifest: the plugin says it in its hello.
+	plugin: { uuid: UUID, version: JSON.parse(readFileSync(new URL(`../${UUID}.sdPlugin/manifest.json`, import.meta.url), "utf8")).Version },
 	devicePixelRatio: 2,
 	colors: {},
 	devices: [{ id: "deck", name: "Fake Stream Deck", size: { columns: 5, rows: 3 }, type: 0 }],

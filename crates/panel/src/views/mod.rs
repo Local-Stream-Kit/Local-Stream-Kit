@@ -15,6 +15,7 @@ pub mod speech;
 pub mod status;
 pub mod test;
 pub mod text_styles;
+pub mod viewers;
 
 use yew::prelude::*;
 
@@ -78,9 +79,12 @@ pub fn icon(name: &str) -> Html {
         "menu" => "M3 4.5h10M3 8h10M3 11.5h10",
         "grip" => "M6 4h.01M10 4h.01M6 8h.01M10 8h.01M6 12h.01M10 12h.01",
         "chevron" => "m6 4 4 4-4 4",
+        "down" => "M4.5 6.5 8 10l3.5-3.5",
+        "search" => "M7 2.5a4.5 4.5 0 1 0 0 9 4.5 4.5 0 0 0 0-9zM10.5 10.5l3 3",
         "pause" => "M5.5 3.5v9M10.5 3.5v9",
         "play" => "M5 3.5v9l7-4.5z",
         "skip" => "M4 3.5v9l6-4.5zM12 3.5v9",
+        "top" => "M3.5 3h9M8 13.5V6.5M4.8 9.7 8 6.5l3.2 3.2",
         "replay" => "M3.5 2.5v3.2h3.2M3.9 5.6A4.8 4.8 0 1 1 3.2 9",
         "volume" => "M2.5 6h2.5l3.5-3v10L5 10H2.5zM11 5.5a3.5 3.5 0 0 1 0 5M12.8 3.8a6 6 0 0 1 0 8.4",
         "mute" => "M2.5 6h2.5l3.5-3v10L5 10H2.5zM11 6l3.5 4M14.5 6 11 10",

@@ -1,6 +1,7 @@
 mod cards;
 mod config;
 mod control;
+mod desktop;
 mod effects;
 mod emote_text;
 mod logging;
@@ -12,8 +13,10 @@ mod plugins;
 mod providers;
 mod reload;
 mod services;
+mod streamdeck;
 mod transformers;
 mod update;
+mod viewers;
 mod web;
 
 use std::path::{Path, PathBuf};
@@ -84,6 +87,10 @@ struct Cli {
     /// built-in one (for tests).
     #[arg(long, hide = true, value_name = "BASE64")]
     update_key: Option<String>,
+    /// Log what the panel asks to open on this PC (a link, the logs
+    /// folder, the Stream Deck plugin) instead of opening it (for tests).
+    #[arg(long, hide = true)]
+    no_open: bool,
 }
 
 #[tokio::main]
@@ -116,6 +123,14 @@ async fn main() -> anyhow::Result<()> {
     let saving = activity.clone();
     tokio::spawn(activity.clone().run());
     let media = media::MediaFolders { pictures: config.pictures_dir(), sounds: config.sounds_dir() };
+    // Not while a recording plays: it isn't chat.
+    let chat_log = services::chat_log::ChatLog::open(
+        config.dir(),
+        &connections.twitch_channel,
+        config.app.chat_log.keep_days,
+        Arc::clone(&emotes),
+        cli.replay.is_none(),
+    );
     let services = Services {
         emotes: Arc::clone(&emotes),
         overlay: hub.clone(),
@@ -123,6 +138,7 @@ async fn main() -> anyhow::Result<()> {
         speech: speech.clone(),
         activity: activity.clone(),
         media: media.clone(),
+        chat_log: chat_log.clone(),
     };
 
     let cache_dir = config.image_cache_dir();
@@ -158,8 +174,11 @@ async fn main() -> anyhow::Result<()> {
     let (inputs, receiver) = mpsc::channel(1024);
     // The chat channel, as configured: chat follows changes while running.
     let (chat_channel, channel_updates) = watch::channel(connections.twitch_channel.clone());
+    // What the Twitch login may do (Status → Twitch's ticks).
+    let (twitch_permissions, permission_updates) = watch::channel(connections.twitch_permissions);
     let mut providers: Vec<Box<dyn Provider>> = Vec::new();
     let mut login = None;
+    let mut moderation = None;
     if let Some(path) = &cli.replay {
         providers.push(Box::new(Replay::new(path.clone(), cli.replay_speed)));
     } else {
@@ -170,12 +189,15 @@ async fn main() -> anyhow::Result<()> {
             None => twitch_eventsub::Server::Twitch {
                 tokens_path: config.twitch_tokens_path(),
                 chat_channel: channel_updates.clone(),
+                allowed: permission_updates.clone(),
             },
         };
         providers.push(Box::new(TwitchChat::new(channel_updates.clone())));
         let (commands, receiver) = mpsc::channel(8);
         login = Some(commands);
-        providers.push(Box::new(TwitchEventSub::new(http.clone(), server, receiver)));
+        let eventsub = TwitchEventSub::new(http.clone(), server, receiver);
+        moderation = eventsub.moderation();
+        providers.push(Box::new(eventsub));
     }
     for provider in providers {
         provider.spawn(inputs.clone(), services.clone());
@@ -187,8 +209,16 @@ async fn main() -> anyhow::Result<()> {
     updater.start(store.subscribe());
     {
         let mut changes = store.subscribe();
+        let chat_log = chat_log.clone();
         tokio::spawn(async move {
             while changes.changed().await.is_ok() {
+                chat_log.set_keep_days(changes.borrow().chat_log.keep_days);
+                let permissions = changes.borrow().connections.twitch_permissions;
+                twitch_permissions.send_if_modified(|current| {
+                    let changed = *current != permissions;
+                    *current = permissions;
+                    changed
+                });
                 let channel = changes.borrow_and_update().connections.twitch_channel.clone();
                 chat_channel.send_if_modified(|current| {
                     let changed = *current != channel;
@@ -274,6 +304,10 @@ async fn main() -> anyhow::Result<()> {
         log,
         speech_previews: Default::default(),
         updates: updater,
+        desktop: desktop::Desktop::new(cli.no_open),
+        cache: config.dir().join("cache"),
+        chat_log,
+        moderation,
     };
     let state = web::AppState { hub, images, debug_inputs: cli.debug.then(|| inputs.clone()), panel };
     let result = tokio::select! {

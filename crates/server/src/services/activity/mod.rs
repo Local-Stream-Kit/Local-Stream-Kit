@@ -29,7 +29,7 @@ use std::time::Duration;
 
 use protocol::Command;
 use protocol::activity::{
-    EventKind, HistoryEntry, HistoryFilter, ItemOrigin, ItemRecord, ItemState, NameColor, Prepared,
+    EventKind, HistoryEntry, HistoryFilter, ItemOrigin, ItemRecord, ItemState, Moved, NameColor, Prepared,
     QUEUE_LIST_LIMIT, QueueAction, QueueGroup, QueueItem, QueueState, Skipped, within_limit,
 };
 use protocol::plugin::{
@@ -758,6 +758,30 @@ impl Activity {
         tracing::info!(id, ?skipped, "queue item skipped");
         self.inner.wake.notify_one();
         skipped
+    }
+
+    /// Moves waiting item `id` to the front, so it plays once what's on
+    /// stage ends. By id, as [`Activity::skip`]: one that's on stage, or
+    /// gone (played, skipped, cleared, withdrawn), is left alone.
+    pub fn play_next(&self, id: u64) -> Moved {
+        let moved = self.update(|state, changes| {
+            if state.stage.as_ref().is_some_and(|stage| stage.item.id == id) {
+                return Moved::OnStage;
+            }
+            let Some(index) = state.waiting.iter().position(|item| item.id == id && !item.withdrawn) else {
+                return Moved::Gone;
+            };
+            if index > 0
+                && let Some(item) = state.waiting.remove(index)
+            {
+                state.waiting.push_front(item);
+                changes.queue = true;
+            }
+            Moved::Waiting
+        });
+        tracing::info!(id, ?moved, "queue item moved to play next");
+        self.inner.wake.notify_one();
+        moved
     }
 
     /// Drops what's waiting from one group (everything with `None`).
@@ -1660,6 +1684,43 @@ mod tests {
         // An id that never was.
         assert_eq!(activity.skip(c + 100), Skipped::Gone);
         assert_eq!(activity.queue().on_stage.map(|item| item.id), Some(c));
+    }
+
+    #[test]
+    fn any_waiting_item_can_be_played_next_by_its_id() {
+        let hub = OverlayHub::new();
+        let mut overlay = hub.subscribe();
+        let activity = Activity::for_tests(hub, Speech::off());
+        let _player = player(&activity);
+        let a = activity.push(alert("a"), &live());
+        let b = activity.push(alert("b"), &live());
+        let c = activity.push(alert("c"), &live());
+        let d = activity.push(alert("d"), &live());
+        activity.step(0);
+        assert_eq!(shown(&sent(&mut overlay)[0]).0, a);
+        let ids = |activity: &Activity| activity.waiting().iter().map(|item| item.id).collect::<Vec<_>>();
+
+        // A waiting one goes to the front; what's on stage plays on.
+        assert_eq!(activity.play_next(c), Moved::Waiting);
+        assert!(sent(&mut overlay).is_empty());
+        assert_eq!(ids(&activity), [c, b, d]);
+        assert_eq!(activity.play_next(c), Moved::Waiting, "at the front already");
+        assert_eq!(ids(&activity), [c, b, d]);
+        assert_eq!(activity.play_next(a), Moved::OnStage);
+        assert!(sent(&mut overlay).is_empty());
+        activity.done(a);
+        activity.step(0);
+        assert_eq!(shown(&sent(&mut overlay)[0]).0, c);
+
+        // Gone (played, skipped, withdrawn, never was): nothing changes.
+        assert_eq!(activity.play_next(a), Moved::Gone);
+        activity.skip(d);
+        assert_eq!(activity.play_next(d), Moved::Gone);
+        let e = activity.push(alert("e"), &live());
+        activity.lock().waiting.iter_mut().find(|item| item.id == e).unwrap().withdrawn = true;
+        assert_eq!(activity.play_next(e), Moved::Gone);
+        assert_eq!(activity.play_next(e + 100), Moved::Gone);
+        assert_eq!(ids(&activity), [b]);
     }
 
     /// The panel shows `first` on stage and the user clicks its Skip; before

@@ -1897,6 +1897,45 @@ async fn the_queue_plays_one_at_a_time_and_events_replay() {
             &format!("{on_stage} === 0 && {up_next} === 0 && !document.getElementById('queue-held')"),
         )
         .await;
+
+    // Played next from its row: Golf goes to the front. The first row's
+    // ⤒ is hidden (it plays next already). While the pointer is on the
+    // list, Golf's row stays where it is with its ⤒ lit, with no note (the
+    // queue didn't move on by itself); it moves up when the pointer leaves.
+    let texts =
+        "[...document.querySelectorAll('ol.queue-list .queue-main')].map(m => m.textContent).join(' | ')";
+    panel.click("#queue-pause").await;
+    panel.wait("paused", "document.getElementById('queue-state').textContent === 'Paused'").await;
+    for (name, viewers) in [("Echo", 9), ("Foxtrot", 10), ("Golf", 11)] {
+        panel.input(raid(name, viewers)).await;
+    }
+    panel.wait("three wait", &format!("{up_next} === 3")).await;
+    let next_of =
+        |n: usize| format!("document.querySelector('ol.queue-list .queue-item:nth-child({n}) .queue-next')");
+    panel.wait("the first's ⤒ hidden", &format!("{}.classList.contains('first')", next_of(1))).await;
+    panel.click("ol.queue-list .queue-item:nth-child(3) .queue-next").await;
+    panel.wait("Golf's ⤒ lit", &format!("{}.getAttribute('aria-pressed') === 'true'", next_of(3))).await;
+    panel.wait("Echo isn't first any more", &format!("!{}.classList.contains('first')", next_of(1))).await;
+    let held: String = panel.eval(texts).await;
+    assert_eq!(
+        held,
+        "Echo is raiding with 9 viewers | Foxtrot is raiding with 10 viewers | Golf is raiding with 11 viewers"
+    );
+    assert_eq!(panel.count("#queue-held").await, 0, "no note for a move made here");
+    panel.hover(away).await;
+    panel
+        .wait(
+            "Golf first once the pointer leaves",
+            &format!(
+                "{texts} === 'Golf is raiding with 11 viewers | Echo is raiding with 9 viewers | Foxtrot is raiding with 10 viewers' \
+                 && {}.classList.contains('first')",
+                next_of(1)
+            ),
+        )
+        .await;
+    panel.click("#queue-resume").await;
+    let (_, text) = overlay.next_show().await;
+    assert_eq!(text, "Golf is raiding with 11 viewers");
     panel.close().await;
 }
 
@@ -2570,6 +2609,36 @@ async fn the_control_api_switches_cards_and_effects_and_fires_events() {
     let (status, _) = panel.request("POST", &with_key("/control/items/next/skip")).await;
     assert_eq!(status, 404);
 
+    // Played next, by id: a waiting one goes to the front; one that's gone
+    // is left alone.
+    panel.request("GET", &format!("{}&colour=Pink", with_key("/control/events/party"))).await;
+    let state = client.wait_for_state("two waiting again", |state| state.queue.up_next.len() == 2).await;
+    let pink = state.queue.up_next[1].id;
+    let next = |id: u64| with_key(&protocol::control::play_next_path(id));
+    let (status, answer) = panel.request("POST", &next(pink)).await;
+    assert_eq!((status, answer["was"].as_str()), (200, Some("waiting")));
+    let state = client.wait_for_state("Pink first", |state| state.queue.up_next[0].id == pink).await;
+    let texts: Vec<&str> = state.queue.up_next.iter().map(|item| item.text.as_str()).collect();
+    assert_eq!(texts, ["Pink party!", "Green party!"]);
+    let (status, answer) = panel.request("GET", &next(blue)).await;
+    assert_eq!((status, answer["was"].as_str()), (200, Some("gone")));
+    client.send(&ControlRequest::PlayNext { id: pink }).await;
+    let was = client
+        .wait_for("the answer", |message| match message {
+            ControlMessage::MovedItem { was, .. } => Some(*was),
+            _ => None,
+        })
+        .await;
+    assert_eq!(was, protocol::activity::Moved::Waiting, "at the front already");
+    // Pink skipped: Green is next again.
+    client.send(&ControlRequest::SkipItem { id: pink }).await;
+    client
+        .wait_for("Pink skipped", |message| match message {
+            ControlMessage::SkippedItem { was, .. } => Some(*was),
+            _ => None,
+        })
+        .await;
+
     // The one on stage, over the WebSocket: it ends.
     panel.request("POST", &with_key("/control/queue/resume")).await;
     let (green, text) = overlay.next_show().await;
@@ -2604,6 +2673,108 @@ async fn the_control_api_switches_cards_and_effects_and_fires_events() {
     let (status, _) = panel.request("GET", &with_key("/control/state")).await;
     assert_eq!(status, 401);
     assert_ne!(app.control_key(), key);
+    panel.close().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs a browser and built panel; run with `cargo e2e`"]
+async fn the_stream_deck_plugin_installs_from_status_and_says_its_version() {
+    use protocol::panel::{PanelEvent, Status};
+    use protocol::streamdeck::{CLIENT, PLUGIN_FILE, release_file_url, shown};
+    let app =
+        App::start("the_stream_deck_plugin_installs_from_status_and_says_its_version", test_config()).await;
+    let panel = Panel::open(&app, "control").await;
+    panel.resize(380, 800).await;
+    let state = "document.getElementById('control-deck-state')?.textContent";
+    let button = "document.getElementById('control-deck-install')?.textContent";
+    let head = "document.querySelector('#control > .box-head > .plugin-status')?.textContent";
+    // The plugin's own version, from its manifest.
+    let manifest = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../streamdeck/com.localstreamkit.streamdeck.sdPlugin/manifest.json"
+    );
+    let manifest: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(manifest).unwrap()).unwrap();
+    let built_in = manifest["Version"].as_str().unwrap().to_string();
+    let version = shown(&built_in).to_string();
+
+    // None connected: Install writes the built-in plugin (cargo e2e's
+    // stand-in) to the cache folder and opens it (logged, with --no-open).
+    panel.wait("no plugin", &format!("{state} === 'Not connected'")).await;
+    panel.wait("Install", &format!("{button} === 'Install'")).await;
+    panel.click("#control-deck-install").await;
+    let opened = |line: &str| line.contains("not opened (--no-open)") && line.contains(PLUGIN_FILE);
+    app.wait_logged("the plugin opened", 1, opened).await;
+    let stand_in = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/stand-in.streamDeckPlugin")).unwrap();
+    let file = app.dir.join("cache").join(PLUGIN_FILE);
+    assert!(std::fs::read(&file).unwrap() == stand_in, "the built-in plugin, in the cache folder");
+    assert_eq!(panel.count("#control-deck-error").await, 0, "nothing to say when it worked");
+
+    // The plugin says its version when it connects, and Status shows it
+    // while it's connected.
+    let mut deck = app.control().await;
+    deck.send(&ControlRequest::Hello { client: CLIENT.into(), version: built_in.clone() }).await;
+    let answer = deck
+        .wait_for("the answer", |message| match message {
+            ControlMessage::Hello { version } => Some(version.clone()),
+            _ => None,
+        })
+        .await;
+    assert_eq!(answer, env!("CARGO_PKG_VERSION"), "the app's version");
+    panel.wait("connected", &format!("{state} === '{version} connected'")).await;
+    assert_eq!(panel.eval::<String>(button).await, "Install");
+    assert_eq!(panel.eval::<String>(head).await, format!("Stream Deck {version}"));
+    // A hello needs a name.
+    deck.send(&ControlRequest::Hello { client: " ".into(), version: "1".into() }).await;
+    let refused = deck
+        .wait_for("the refusal", |message| match message {
+            ControlMessage::Error { status, .. } => Some(*status),
+            _ => None,
+        })
+        .await;
+    assert_eq!(refused, 400);
+    drop(deck);
+    panel.wait("gone", &format!("{state} === 'Not connected'")).await;
+
+    // An older one: Update installs the built-in one.
+    let mut old = app.control().await;
+    old.send(&ControlRequest::Hello { client: CLIENT.into(), version: "0.0.1.0".into() }).await;
+    panel.wait("the old one", &format!("{state} === '0.0.1 connected'")).await;
+    panel.wait("Update", &format!("{button} === 'Update to {version}'")).await;
+    assert_eq!(panel.eval::<String>(head).await, "Stream Deck 0.0.1");
+    panel.click("#control-deck-install").await;
+    app.wait_logged("the plugin opened again", 2, opened).await;
+    let wide: f64 = panel.eval("document.documentElement.scrollWidth").await;
+    assert!(wide <= 380.0, "fits the dock: {wide}");
+
+    // A build without the plugin says so, and links to the release's file,
+    // opened in the browser on the app's PC. (Its status, handed to the
+    // panel; the server's own are held back from then on.)
+    let status = Status {
+        version: env!("CARGO_PKG_VERSION").into(),
+        control_key: app.control_key(),
+        ..Status::default()
+    };
+    let json = serde_json::to_string(&PanelEvent::Status { status }).unwrap();
+    panel
+        .run(&format!(
+            "const socket = window.__panelSockets.at(-1); const real = socket.onmessage; \
+             real.call(socket, new MessageEvent('message', {{ data: {} }})); \
+             socket.onmessage = event => JSON.parse(event.data).type === 'status' || real.call(socket, event);",
+            js_string(&json)
+        ))
+        .await;
+    panel.wait("no plugin built in", "document.getElementById('control-deck-none')").await;
+    assert_eq!(panel.count("#control-deck-install").await, 0);
+    let href: String =
+        panel.eval("document.getElementById('control-deck-download').getAttribute('href')").await;
+    assert_eq!(href, release_file_url(&protocol::update::releases(), env!("CARGO_PKG_VERSION")));
+    panel.click("#control-deck-download").await;
+    app.wait_logged("the release's file opened", 1, |line| {
+        line.contains("not opened (--no-open)") && line.contains(&href)
+    })
+    .await;
+    drop(old);
     panel.close().await;
 }
 
@@ -6257,4 +6428,336 @@ async fn only_this_pc_reaches_the_app() {
     let sandboxed: String = overlay.eval(&opened("f.sandbox = 'allow-scripts';")).await;
     assert_eq!(sandboxed, "refused", "a sandboxed frame (Origin null)");
     overlay.close().await;
+}
+
+/// Unix ms now, for inputs that go in the chat log (one file a day).
+fn now_ms() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64
+}
+
+/// Something from Twitch chat, as the chat provider sends it.
+fn chat_input(at_ms: u64, kind: serde_json::Value) -> serde_json::Value {
+    serde_json::json!({
+        "at_ms": at_ms,
+        "origin": { "provider": "twitch_chat", "platform": "twitch", "channel": { "id": "1", "name": "chan" } },
+        "kind": kind,
+    })
+}
+
+/// A chat message from MossyKnight.
+fn mossy_says(at_ms: u64, id: &str, text: &str) -> serde_json::Value {
+    chat_input(
+        at_ms,
+        serde_json::json!({
+            "input": "message",
+            "id": id,
+            "user": { "id": "1001", "name": "mossyknight", "display_name": "MossyKnight", "color": "#1E90FF" },
+            "text": text,
+            "emotes": [],
+        }),
+    )
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs a browser and built panel; run with `cargo e2e`"]
+async fn viewer_cards_show_their_log_and_moderate() {
+    use protocol::panel::PanelEvent;
+    use protocol::viewers::{Access, Banned, ViewerCard, ViewerInfo};
+
+    let app = App::start_debug("viewer_cards_show_their_log_and_moderate", test_config()).await;
+    let panel = Panel::open(&app, "activity").await;
+    let now = now_ms();
+    let day = 86_400_000;
+    panel.input(mossy_says(now - day, "m1", "hi chat! first time here")).await;
+    panel.input(mossy_says(now - day + 1_000, "m2", "check this out")).await;
+    panel
+        .input(chat_input(
+            now - day + 2_000,
+            serde_json::json!({ "input": "moderation", "type": "message_deleted", "id": "m2" }),
+        ))
+        .await;
+    panel
+        .input(chat_input(
+            now - day + 3_000,
+            serde_json::json!({ "input": "moderation", "type": "user_cleared", "user_id": "1001", "timeout_secs": 600 }),
+        ))
+        .await;
+    panel.input(mossy_says(now - 60_000, "m3", "gg! that was clean")).await;
+    // A follow, from EventSub: in the History, with the viewer's id.
+    panel
+        .input(serde_json::json!({
+            "at_ms": now,
+            "origin": { "provider": "twitch_eventsub", "platform": "twitch", "channel": { "id": "1", "name": "chan" } },
+            "kind": { "input": "event", "event": "follow", "user": { "id": "1001", "name": "mossyknight", "display_name": "MossyKnight" } },
+        }))
+        .await;
+
+    // Find a viewer offers who has chatted; picking one opens the card.
+    panel.click("#viewer-find").await;
+    panel.type_text("moss").await;
+    panel
+        .wait(
+            "MossyKnight offered",
+            "document.querySelector('.viewer-found-item')?.dataset.viewer === 'mossyknight'",
+        )
+        .await;
+    panel.click(".viewer-found-item").await;
+    panel
+        .wait(
+            "the card",
+            "document.querySelector('#viewer-card .viewer-title')?.textContent === 'MossyKnight'",
+        )
+        .await;
+    let field: String = panel.eval("document.getElementById('viewer-find').value").await;
+    assert_eq!(field, "", "the field empties");
+    let messages: String = panel.eval("document.getElementById('viewer-messages').textContent").await;
+    assert_eq!(messages, "Messages · 3");
+    let lines = "[...document.querySelectorAll('#viewer-log .log-line .log-text')].map(t => t.textContent).join(' | ')";
+    panel.wait("the follow, from the History", &format!("{lines}.includes('Followed')")).await;
+    let read: String = panel.eval(lines).await;
+    assert_eq!(
+        read,
+        "hi chat! first time here | check this out · deleted | Timed out for 10 min | gg! that was clean | Followed"
+    );
+    let days: String = panel
+        .eval("[...document.querySelectorAll('#viewer-log .log-day')].map(d => d.textContent).join(' | ')")
+        .await;
+    assert_eq!(days, "Yesterday | Today");
+    let note: String = panel.eval("document.querySelector('#viewer-twitch-note > span').textContent").await;
+    assert_eq!(note, "Only chat seen while Local Stream Kit was running. Full log on Twitch");
+    // Its ×: closed for good (in the config), its link by Messages.
+    panel.click("#viewer-twitch-note-close").await;
+    app.wait_for_config("the note closed", |config| config.closed_notes.chat_log).await;
+    panel.wait("the note gone", "!document.getElementById('viewer-twitch-note')").await;
+    let link: String =
+        panel.eval("document.querySelector('.viewer-log-head #viewer-twitch-card').textContent").await;
+    assert_eq!(link, "On Twitch");
+    // Not logged in: the log, and what to do to moderate.
+    let access: String = panel.eval("document.getElementById('viewer-access').textContent").await;
+    assert_eq!(access, "Log in with Twitch on Status to time out, ban or warn.");
+    assert_eq!(panel.count("#viewer-buttons").await, 0);
+
+    // A new line shows while the card is open.
+    panel.input(mossy_says(now_ms(), "m4", "one more thing")).await;
+    panel.wait("the new line", &format!("{lines}.endsWith('one more thing')")).await;
+    let messages: String = panel.eval("document.getElementById('viewer-messages').textContent").await;
+    assert_eq!(messages, "Messages · 4");
+
+    // Closed; a name in the History opens it again, without opening the entry.
+    panel.click("#viewer-close").await;
+    panel.wait("the card closed", "!document.getElementById('viewer-card')").await;
+    panel.click(".history-item button.viewer-name").await;
+    panel.wait("the card again", "!!document.getElementById('viewer-card')").await;
+    let entry_open: bool = panel.eval("document.querySelector('.history-item details').open").await;
+    assert!(!entry_open, "the History entry stays closed");
+
+    // A name nobody has used in chat.
+    panel.click("#viewer-find").await;
+    panel.type_text("nobody_here").await;
+    panel.key(Key::ENTER, 0).await;
+    panel.wait("why there's no card", "document.getElementById('viewer-missing')?.textContent === 'Nobody called nobody_here has chatted yet.'").await;
+
+    // Logged in (handed to the panel): the moderator's buttons.
+    let card = |access| ViewerCard {
+        id: "1001".into(),
+        login: "mossyknight".into(),
+        name: "MossyKnight".into(),
+        color: Some("#1E90FF".into()),
+        badges: Vec::new(),
+        messages: 1,
+        lines: vec![protocol::viewers::LogLine {
+            at_ms: now_ms(),
+            kind: protocol::viewers::LineKind::Message {
+                id: "m9".into(),
+                text: "hello".into(),
+                parts: Vec::new(),
+                deleted: false,
+                action: false,
+            },
+        }],
+        older: 0,
+        access,
+    };
+    panel.run("document.getElementById('viewer-find').blur()").await;
+    panel.receive(&PanelEvent::Viewer { card: card(Access::Ready { roles: true }) }).await;
+    panel.wait("the buttons", "!!document.getElementById('viewer-buttons')").await;
+    let info =
+        |info: ViewerInfo| PanelEvent::ViewerInfo { id: "1001".into(), info: Some(info), problem: None };
+    let year = 365 * day;
+    panel
+        .receive(&info(ViewerInfo {
+            created_ms: now - 3 * year,
+            following_since_ms: Some(now - year),
+            ..ViewerInfo::default()
+        }))
+        .await;
+    let buttons =
+        "[...document.querySelectorAll('#viewer-buttons button')].map(b => b.textContent).join(' | ')";
+    panel
+        .wait(
+            "the info line",
+            "document.getElementById('viewer-info')?.textContent.startsWith('Following since')",
+        )
+        .await;
+    let shown: String = panel.eval(buttons).await;
+    assert_eq!(shown, "Timeout | Ban | Warn | Shoutout | VIP | Mod");
+    let about: String = panel.eval("document.getElementById('viewer-info').textContent").await;
+    assert!(about.ends_with(" · Account 3 years old"), "{about}");
+    assert_eq!(panel.count("#viewer-log .log-bin").await, 1, "a recent message can be deleted");
+
+    // Timeout opens its lengths.
+    panel.click("#viewer-timeout").await;
+    let lengths: String = panel
+        .eval("[...document.querySelectorAll('#viewer-timeouts button')].map(b => b.textContent).join(' | ')")
+        .await;
+    assert_eq!(lengths, "1 min | 10 min | 1 hour | 1 day | 1 week");
+    panel.click("#viewer-timeout").await;
+    panel.wait("the lengths closed", "!document.getElementById('viewer-timeouts')").await;
+
+    // Ban and Mod ask once more; the server says why it didn't happen.
+    panel.click("#viewer-ban").await;
+    let asking: String = panel.eval("document.getElementById('viewer-ban').textContent").await;
+    assert_eq!(asking, "Ban MossyKnight?");
+    panel.click("#viewer-ban").await;
+    panel
+        .wait(
+            "the server's answer",
+            "document.getElementById('viewer-problem')?.textContent === 'Couldn\\'t ban MossyKnight: Log in with Twitch on Status to moderate.'",
+        )
+        .await;
+    panel.click("#viewer-mod").await;
+    let asking: String = panel.eval("document.getElementById('viewer-mod').textContent").await;
+    assert_eq!(asking, "Make MossyKnight a mod?");
+
+    // Warn needs a reason.
+    panel.click("#viewer-warn").await;
+    panel.wait("the reason", "!!document.getElementById('viewer-warn-reason')").await;
+    let send_off: bool = panel.eval("document.getElementById('viewer-warn-send').disabled").await;
+    assert!(send_off, "no reason yet");
+
+    // A VIP: Remove VIP, and no Mod; a mod: Remove mod, and no VIP.
+    panel.receive(&info(ViewerInfo { vip: true, ..ViewerInfo::default() })).await;
+    panel.wait("Remove VIP", &format!("{buttons}.includes('Remove VIP')")).await;
+    let shown: String = panel.eval(buttons).await;
+    assert_eq!(shown, "Timeout | Ban | Warn | Shoutout | Remove VIP");
+    panel.receive(&info(ViewerInfo { moderator: true, ..ViewerInfo::default() })).await;
+    panel.wait("Remove mod", &format!("{buttons}.includes('Remove mod')")).await;
+
+    // Timed out: Remove timeout and Ban, and how long is left; banned: Unban.
+    let banned = |until_ms| ViewerInfo { banned: Some(Banned { until_ms }), ..ViewerInfo::default() };
+    panel.receive(&info(banned(Some(now_ms() + 600_000)))).await;
+    panel
+        .wait(
+            "timed out",
+            "document.getElementById('viewer-state')?.textContent === 'Timed out · 10 min left'",
+        )
+        .await;
+    let shown: String = panel.eval(buttons).await;
+    assert_eq!(shown, "Remove timeout | Ban");
+    panel.receive(&info(banned(None))).await;
+    panel.wait("banned", "document.getElementById('viewer-state')?.textContent === 'Banned'").await;
+    let shown: String = panel.eval(buttons).await;
+    assert_eq!(shown, "Unban");
+
+    // VIPs and mods not ticked: no VIP or Mod.
+    panel.receive(&PanelEvent::Viewer { card: card(Access::Ready { roles: false }) }).await;
+    panel.receive(&info(ViewerInfo::default())).await;
+    panel.wait("no VIP or Mod", &format!("{buttons} === 'Timeout | Ban | Warn | Shoutout'")).await;
+
+    // Moderating not ticked, or ticked after logging in: what to do, with
+    // a link to the Twitch box.
+    panel.receive(&PanelEvent::Viewer { card: card(Access::Off) }).await;
+    panel
+        .wait(
+            "moderating off",
+            "document.getElementById('viewer-access')?.textContent === 'Moderating is off: Twitch'",
+        )
+        .await;
+    let link: String =
+        panel.eval("document.getElementById('viewer-access-ticks').getAttribute('href')").await;
+    assert_eq!(link, "#/login", "Status, with the Twitch box open");
+    panel.receive(&PanelEvent::Viewer { card: card(Access::NewLogin) }).await;
+    panel
+        .wait("a new login", "document.getElementById('viewer-access')?.textContent === 'Moderating needs a new login: Twitch'")
+        .await;
+
+    // Logged in as another channel; closed, it stays closed for that pair.
+    let other = || PanelEvent::Viewer { card: card(Access::OtherChannel { login: "someone".into() }) };
+    panel.receive(&other()).await;
+    panel.wait("the other login", "document.getElementById('viewer-access')?.textContent.startsWith('The Twitch login is for someone')").await;
+    panel.click("#viewer-access-close").await;
+    app.wait_for_config("closed for the pair", |config| config.closed_notes.card_other_channel == "someone/")
+        .await;
+    panel.wait("the note gone", "!document.getElementById('viewer-access')").await;
+    panel.receive(&other()).await;
+    assert_eq!(panel.count("#viewer-access").await, 0, "still closed");
+    panel.close().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs a browser and built panel; run with `cargo e2e`"]
+async fn the_twitch_box_ticks_what_the_login_may_do() {
+    use protocol::config::TwitchPermissions;
+    use protocol::panel::{LoginCode, LoginStatus, PanelEvent, Status};
+
+    let app = App::start("the_twitch_box_ticks_what_the_login_may_do", test_config()).await;
+    let panel = Panel::open(&app, "status").await;
+    open_status_box(&panel, "status-twitch").await;
+    panel.wait("the ticks", "!!document.getElementById('allow-roles')").await;
+    let ticks = "['channel-points', 'follows', 'hype-train', 'moderating', 'roles']                  .map(key => document.getElementById('allow-' + key).checked).join(' ')";
+    let ticked: String = panel.eval(ticks).await;
+    assert_eq!(ticked, "true true true false false", "the events on, moderating off");
+    assert_eq!(panel.count("#status-moderating").await, 0, "no state without a login");
+
+    // A tick is saved with the config.
+    panel.click("#allow-moderating").await;
+    app.wait_for_config("moderating ticked", |config| config.connections.twitch_permissions.moderating).await;
+
+    // Logged in (handed to the panel) with a login made for the events
+    // only: moderating needs a new login, offered under Log out.
+    let logged_in = |renewal: Option<LoginCode>| PanelEvent::Status {
+        status: Status {
+            login: LoginStatus::LoggedIn {
+                login: "chan".into(),
+                listening: true,
+                points: true,
+                follows: true,
+                hype_train: false,
+                granted: TwitchPermissions::default(),
+            },
+            renewal,
+            ..Status::default()
+        },
+    };
+    panel.receive(&logged_in(None)).await;
+    let states = "['channel-points', 'follows', 'hype-train', 'moderating', 'roles']                   .map(key => document.getElementById('status-' + key)?.textContent).join(' | ')";
+    panel.wait("the states", "!!document.getElementById('status-moderating')").await;
+    let read: String = panel.eval(states).await;
+    assert_eq!(
+        read,
+        "Listening · 0 rewards | Listening | Twitch refused; see the log | Needs a new login | Off"
+    );
+    assert_eq!(panel.count("#login-logout").await, 1);
+    assert_eq!(panel.count("#login-start").await, 1, "a new login for moderating");
+
+    // The second login's code, while the first goes on.
+    panel
+        .receive(&logged_in(Some(LoginCode {
+            url: "https://www.twitch.tv/activate".into(),
+            code: "ABCDEFGH".into(),
+            expires_at_ms: u64::MAX / 2,
+        })))
+        .await;
+    panel.wait("the code", "document.querySelector('#login-renewal #login-code')").await;
+    assert_eq!(panel.count("#login-start").await, 0);
+    assert_eq!(panel.count("#login-logout").await, 1);
+
+    // Untick it: off, and no new login to offer.
+    panel.receive(&logged_in(None)).await;
+    panel.click("#allow-moderating").await;
+    panel.wait("moderating off", "document.getElementById('status-moderating')?.textContent === 'Off'").await;
+    assert_eq!(panel.count("#login-start").await, 0);
+    app.wait_for_config("moderating unticked", |config| !config.connections.twitch_permissions.moderating)
+        .await;
+    panel.close().await;
 }

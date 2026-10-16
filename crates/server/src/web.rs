@@ -72,6 +72,7 @@ pub async fn serve(port: u16, state: AppState) -> anyhow::Result<()> {
         .route("/control/effects/{id}/{set}", get(control::effect).post(control::effect))
         .route("/control/queue/{action}", get(control::queue).post(control::queue))
         .route("/control/items/{id}/skip", get(control::skip_item).post(control::skip_item))
+        .route("/control/items/{id}/next", get(control::play_next).post(control::play_next))
         .route("/control/mute/{set}", get(control::mute).post(control::mute))
         .route(protocol::control::HISTORY_SEEN_PATH, get(control::history_seen).post(control::history_seen))
         .route("/control/events/{name}", get(control::event).post(control::event))

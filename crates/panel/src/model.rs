@@ -17,6 +17,7 @@ use protocol::config::AppConfig;
 use protocol::panel::{KnownEmote, MediaFolder, PanelEvent, Status};
 use protocol::plugin::PluginLook;
 use protocol::plugin::{Catalog, PluginFailure};
+use protocol::viewers::{FoundViewer, LineKind, ViewerAction, ViewerCard, ViewerInfo};
 use yew::Reducible;
 
 use crate::rebase::rebase;
@@ -98,6 +99,15 @@ pub struct Model {
     pub plugin_failures: Rc<Vec<PluginFailure>>,
     /// Why a plugin couldn't be removed or forgotten, for the Plugins page.
     pub plugin_problem: Option<String>,
+    /// The viewer card open in Activity.
+    pub viewer: Option<Rc<ViewerState>>,
+    /// The card asked for and not here yet: its id, else the name typed
+    /// (lowercase). Only its answer is taken.
+    opening: Option<String>,
+    /// Find a viewer: the text the server answered for, and who it found.
+    pub found: Rc<(String, Vec<FoundViewer>)>,
+    /// Why the viewer asked for has no card: the name, and why.
+    pub viewer_missing: Option<(String, String)>,
     /// The empty card just made on the New card page, as it was made:
     /// left unchanged, it goes again. One from a preset stays.
     new_card: Option<Card>,
@@ -137,6 +147,10 @@ impl Default for Model {
             plugins: Rc::default(),
             plugin_failures: Rc::default(),
             plugin_problem: None,
+            viewer: None,
+            opening: None,
+            found: Rc::default(),
+            viewer_missing: None,
             new_card: None,
             undo: Vec::new(),
             redo: Vec::new(),
@@ -163,6 +177,20 @@ impl Model {
 
 /// A change to the config.
 pub type Change = Rc<dyn Fn(&mut AppConfig)>;
+
+/// The viewer card open in Activity, and what's going on with it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ViewerState {
+    pub card: ViewerCard,
+    /// What Twitch says about them, once it has.
+    pub info: Option<ViewerInfo>,
+    /// Why Twitch couldn't be asked.
+    pub info_problem: Option<String>,
+    /// An action sent and not answered yet.
+    pub pending: Option<ViewerAction>,
+    /// Why the last action didn't happen, for people.
+    pub problem: Option<String>,
+}
 
 // Actions live for one dispatch; boxing the server's events would only
 // make every match on them clumsier.
@@ -195,6 +223,11 @@ pub enum Action {
         key: String,
         draft: Option<FileDraft>,
     },
+    /// A viewer's card was asked for: by id, else by the name typed.
+    OpenViewer(String),
+    CloseViewer,
+    /// An action on the open card's viewer went out.
+    Moderating(ViewerAction),
 }
 
 /// Every plugin's file settings' looks, by plugin and key.
@@ -303,6 +336,101 @@ impl Reducible for Model {
                 model.plugin_files = Rc::new(files);
             }
             Action::Server(PanelEvent::PluginSecrets { saved }) => model.plugin_secrets = Rc::new(saved),
+            Action::OpenViewer(key) => {
+                model.opening = Some(key);
+                model.viewer_missing = None;
+            }
+            Action::CloseViewer => {
+                model.viewer = None;
+                model.opening = None;
+            }
+            Action::Moderating(action) => {
+                let Some(viewer) = &mut model.viewer else { return self };
+                let viewer = Rc::make_mut(viewer);
+                viewer.pending = Some(action);
+                viewer.problem = None;
+            }
+            Action::Server(PanelEvent::ViewersFound { text, viewers }) => {
+                model.found = Rc::new((text, viewers))
+            }
+            Action::Server(PanelEvent::Viewer { card }) => {
+                let asked = model.opening.as_deref().is_some_and(|key| {
+                    key == card.id || key == card.login.to_lowercase() || key == card.name.to_lowercase()
+                });
+                // Asked for, or the open one again (after a reconnect).
+                let again = model.viewer.as_ref().is_some_and(|open| open.card.id == card.id);
+                if !asked && !again {
+                    return self;
+                }
+                let keep = model.viewer.take().filter(|open| open.card.id == card.id);
+                model.opening = None;
+                model.viewer = Some(Rc::new(ViewerState {
+                    info: keep.as_ref().and_then(|open| open.info.clone()),
+                    info_problem: None,
+                    pending: None,
+                    problem: None,
+                    card,
+                }));
+            }
+            // The answer to the card asked for last.
+            Action::Server(PanelEvent::ViewerMissing { name, problem }) => {
+                if model.opening.is_none() {
+                    return self;
+                }
+                model.opening = None;
+                model.viewer_missing = Some((name, problem));
+            }
+            Action::Server(PanelEvent::ViewerInfo { id, info, problem }) => {
+                let Some(viewer) = model.viewer.as_mut().filter(|open| open.card.id == id) else {
+                    return self;
+                };
+                let viewer = Rc::make_mut(viewer);
+                viewer.info = info.or(viewer.info.take());
+                viewer.info_problem = problem;
+            }
+            Action::Server(PanelEvent::ViewerOlder { id, lines, older }) => {
+                let Some(viewer) = model.viewer.as_mut().filter(|open| open.card.id == id) else {
+                    return self;
+                };
+                let card = &mut Rc::make_mut(viewer).card;
+                if older < card.older {
+                    let mut all = lines;
+                    all.append(&mut card.lines);
+                    card.lines = all;
+                    card.older = older;
+                }
+            }
+            Action::Server(PanelEvent::ViewerLine { id, line }) => {
+                let Some(viewer) = model.viewer.as_mut().filter(|open| open.card.id == id) else {
+                    return self;
+                };
+                let card = &mut Rc::make_mut(viewer).card;
+                if matches!(line.kind, LineKind::Message { .. }) {
+                    card.messages += 1;
+                }
+                card.lines.push(line);
+            }
+            Action::Server(PanelEvent::ViewerMessageDeleted { id, message }) => {
+                let Some(viewer) = model.viewer.as_mut().filter(|open| open.card.id == id) else {
+                    return self;
+                };
+                for line in &mut Rc::make_mut(viewer).card.lines {
+                    if let LineKind::Message { id, deleted, .. } = &mut line.kind
+                        && *id == message
+                    {
+                        *deleted = true;
+                    }
+                }
+            }
+            Action::Server(PanelEvent::Moderated { id, action, problem }) => {
+                let Some(viewer) = model.viewer.as_mut().filter(|open| open.card.id == id) else {
+                    return self;
+                };
+                let viewer = Rc::make_mut(viewer);
+                viewer.pending = None;
+                viewer.problem = problem
+                    .map(|problem| format!("Couldn't {} {}: {problem}", action.verb(), viewer.card.name));
+            }
             Action::Server(PanelEvent::PluginOptions { options }) => model.plugin_options = Rc::new(options),
             Action::QueueNoteClosed => model.queue_note = None,
             Action::FileDraft { plugin, key, draft } => {

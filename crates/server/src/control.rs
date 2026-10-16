@@ -4,7 +4,8 @@
 //! through [`run`]. On the WebSocket, a program can also be a plugin (the
 //! external connection API): it registers its node types, fires its event
 //! nodes, is sent its effect nodes' runs, and makes messages in its voices
-//! when asked.
+//! when asked. A program can also say which it is (`hello`): Status shows
+//! the Stream Deck plugin's version while it's connected.
 //!
 //! Every request needs the key: browsers let any web page send requests to
 //! localhost (they just can't read the answers), and WebSockets aren't
@@ -40,6 +41,7 @@ use crate::panel::PanelState;
 use crate::pipeline::now_ms;
 use crate::services::overlay_hub::OverlayHub;
 use crate::services::speech::{self, MAX_AUDIO, SpeakRequest, Speaker};
+use crate::services::status::StreamDeckGuard;
 use crate::web::AppState;
 
 pub const KEYS_FILE: &str = "lsk_control.json";
@@ -230,6 +232,10 @@ pub async fn run(request: ControlRequest, panel: &PanelState) -> Result<ControlM
             let was = panel.activity.skip(id);
             Ok(ControlMessage::SkippedItem { id, was })
         }
+        ControlRequest::PlayNext { id } => {
+            let was = panel.activity.play_next(id);
+            Ok(ControlMessage::MovedItem { id, was })
+        }
         ControlRequest::HistorySeen => {
             panel.activity.mark_seen(None);
             tracing::info!("control API: history seen");
@@ -254,6 +260,10 @@ pub async fn run(request: ControlRequest, panel: &PanelState) -> Result<ControlM
             tracing::info!(event = name, "control API");
             Ok(ControlMessage::Fired { name })
         }
+        ControlRequest::Hello { .. } => Err(ControlError::new(
+            StatusCode::BAD_REQUEST,
+            "a program says hello on the WebSocket (/control/ws)",
+        )),
         ControlRequest::Register { .. } | ControlRequest::Emit { .. } | ControlRequest::Spoken { .. } => {
             Err(ControlError::new(
                 StatusCode::BAD_REQUEST,
@@ -282,6 +292,27 @@ async fn send_event(panel: &PanelState, event: PlatformEvent) -> Result<(), Cont
         .send(input)
         .await
         .map_err(|_| ControlError::new(StatusCode::SERVICE_UNAVAILABLE, "the pipeline has stopped"))
+}
+
+/// The program says which it is. A Stream Deck plugin counts as connected,
+/// with its version, until the connection closes (or another hello).
+fn hello(
+    client: &str,
+    version: &str,
+    stream_deck: &mut Option<StreamDeckGuard>,
+    panel: &PanelState,
+) -> Result<ControlMessage, ControlError> {
+    let (client, version) = (client.trim(), version.trim());
+    if client.is_empty() || client.len() > 64 || version.len() > 32 {
+        let message = "a hello needs the program's name (up to 64 characters) and its version (up to 32)";
+        return Err(ControlError::new(StatusCode::BAD_REQUEST, message));
+    }
+    tracing::info!(client, version, "control API client said which it is");
+    *stream_deck = None;
+    if client == protocol::streamdeck::CLIENT {
+        *stream_deck = Some(panel.status.stream_deck_connected(version.to_string()));
+    }
+    Ok(ControlMessage::Hello { version: crate::update::RUNNING.to_string() })
 }
 
 /// A connection that registered as a plugin: its id, and the overlay
@@ -484,11 +515,13 @@ fn answer(message: ControlMessage) -> Response {
         ControlMessage::Effect { effect } => serde_json::to_value(effect),
         ControlMessage::Queue { queue } => serde_json::to_value(queue),
         ControlMessage::SkippedItem { id, was } => Ok(serde_json::json!({ "id": id, "was": was })),
+        ControlMessage::MovedItem { id, was } => Ok(serde_json::json!({ "id": id, "was": was })),
         ControlMessage::Sound { sound } => serde_json::to_value(sound),
         ControlMessage::History { history } => serde_json::to_value(history),
         ControlMessage::Fired { name } => Ok(serde_json::json!({ "fired": name })),
         // Only on the WebSocket.
-        message @ (ControlMessage::Registered { .. }
+        message @ (ControlMessage::Hello { .. }
+        | ControlMessage::Registered { .. }
         | ControlMessage::Emitted { .. }
         | ControlMessage::Run { .. }
         | ControlMessage::Speak { .. }) => serde_json::to_value(message),
@@ -614,6 +647,20 @@ pub async fn skip_item(
     }
 }
 
+/// `/control/items/{id}/next`: one waiting item to the front, by the id
+/// the state lists it with.
+pub async fn play_next(
+    State(app): State<AppState>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+    Query(params): Query<Params>,
+) -> Response {
+    match item_id(&id) {
+        Ok(id) => respond(&app, &headers, &params, ControlRequest::PlayNext { id }).await,
+        Err(error) => error.into_response(),
+    }
+}
+
 fn item_id(id: &str) -> Result<u64, ControlError> {
     id.parse().map_err(|_| {
         let message = format!("{id:?} isn't an item id; the state's queue lists them");
@@ -681,11 +728,15 @@ async fn connection(socket: WebSocket, panel: PanelState, hub: OverlayHub) {
         return;
     }
     let mut plugin: Option<Registered> = None;
+    let mut stream_deck: Option<StreamDeckGuard> = None;
     loop {
         tokio::select! {
             message = receiver.next() => match message {
                 Some(Ok(WsMessage::Text(text))) => {
                     let answer = match serde_json::from_str::<ControlRequest>(&text) {
+                        Ok(ControlRequest::Hello { client, version }) => {
+                            hello(&client, &version, &mut stream_deck, &panel)
+                        }
                         Ok(ControlRequest::Register { plugin: manifest }) => {
                             register(*manifest, &mut plugin, &panel, &hub).await
                         }

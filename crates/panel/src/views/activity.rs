@@ -1,8 +1,10 @@
-//! Activity: the queue on top (what's on stage, what's up next; pause,
-//! skip what's on stage or any one waiting, clear all or one kind; the
-//! master volume and mute), and the history of events below it, each
-//! with what it caused and a Replay, and a "Seen up to here" line when
-//! it's on. One look answers "did that sub's alert play yet?"
+//! Activity: Find a viewer and the viewer's card on top (`viewers`), the
+//! queue (what's on stage, what's up next; pause, skip what's on stage or
+//! any one waiting, play any one waiting next, clear all or one kind; the
+//! master volume and mute), and the history of events below it, each with
+//! what it caused and a Replay, and a "Seen up to here" line when it's on.
+//! One look answers "did that sub's alert play yet?" Every viewer's name
+//! opens their card.
 
 use std::collections::HashSet;
 use std::rc::Rc;
@@ -10,8 +12,8 @@ use std::rc::Rc;
 use gloo::timers::callback::Timeout;
 use protocol::AlertPart;
 use protocol::activity::{
-    EventKind, HistoryEntry, HistoryFilter, ItemOrigin, ItemState, QueueAction, QueueGroup, QueueItem,
-    QueueState,
+    EventKind, HistoryEntry, HistoryFilter, ItemOrigin, ItemState, NameColor, QueueAction, QueueGroup,
+    QueueItem, QueueState,
 };
 use protocol::panel::{LinkFrom, PanelRequest};
 use protocol::plugin::TextPart;
@@ -30,6 +32,8 @@ const PAGE: usize = 100;
 pub fn Activity() -> Html {
     html! {
         <section class="page">
+            <super::viewers::FindViewer />
+            <super::viewers::ViewerBox />
             <Queue />
             <History />
         </section>
@@ -63,8 +67,10 @@ fn Queue() -> Html {
     // on; it catches up when the pointer leaves. Rows that leave the queue
     // meanwhile (skipped here too) stay, faded, as taking them out would
     // move the rest; new items join at the end, where they move nothing.
+    // Rows played next from here stay in place too, their ⤒ lit.
     let held = use_state(|| None::<Rc<QueueState>>);
     let skipped_here = use_state(HashSet::<u64>::new);
+    let next_here = use_state(Vec::<u64>::new);
     // What preparing the waiting events again last changed, until closed;
     // meanwhile the rows it changed flash as they show.
     let note = panel.model.queue_note;
@@ -76,14 +82,20 @@ fn Queue() -> Html {
     let on_enter = {
         let held = held.clone();
         let queue = queue.clone();
-        Callback::from(move |_: MouseEvent| held.set(Some(queue.clone())))
+        let next_here = next_here.clone();
+        Callback::from(move |_: MouseEvent| {
+            held.set(Some(queue.clone()));
+            next_here.set(Vec::new());
+        })
     };
     let on_leave = {
         let held = held.clone();
         let skipped_here = skipped_here.clone();
+        let next_here = next_here.clone();
         Callback::from(move |_: MouseEvent| {
             held.set(None);
             skipped_here.set(HashSet::new());
+            next_here.set(Vec::new());
         })
     };
     let shown = match &*held {
@@ -126,6 +138,18 @@ fn Queue() -> Html {
         })
     };
     let on_skip = queue.on_stage.as_ref().map(|item| skip(item.id));
+    // By id too: one that has gone, or gone on stage, stays where it is.
+    let play_next = |id: u64| {
+        let panel = panel.clone();
+        let next_here = next_here.clone();
+        Callback::from(move |_: MouseEvent| {
+            panel.send(PanelRequest::PlayNext { id });
+            let mut next = (*next_here).clone();
+            next.retain(|other| *other != id);
+            next.push(id);
+            next_here.set(next);
+        })
+    };
     let on_clear = {
         let panel = panel.clone();
         let confirm = confirm.clone();
@@ -190,7 +214,9 @@ fn Queue() -> Html {
             panel.send(PanelRequest::OpenLink { from: LinkFrom::Item(id), url });
         })
     };
-    let row = |item: &QueueItem, on_skip: Option<Callback<MouseEvent>>| {
+    let first = queue.waiting.first().map(|item| item.id);
+    let open_viewer = super::viewers::opener(&panel);
+    let row = |item: &QueueItem, waiting: bool| {
         let gone = !live.contains(&item.id);
         let look = if gone {
             Look::Gone
@@ -199,16 +225,32 @@ fn Queue() -> Html {
         } else {
             Look::Waiting
         };
-        item_view(item, on_skip.filter(|_| !gone), look, &open(item.id))
+        let next = if next_here.contains(&item.id) {
+            NextButton::Moved
+        } else if first == Some(item.id) {
+            NextButton::First
+        } else {
+            NextButton::Ready
+        };
+        let buttons =
+            (waiting && !gone).then(|| RowButtons { next: (play_next(item.id), next), skip: skip(item.id) });
+        item_view(item, buttons, look, &open(item.id), &open_viewer)
     };
     let shown_total = shown.waiting_count;
     let listed: Vec<&QueueItem> =
         shown.waiting.iter().filter(|item| only.is_none_or(|group| item.group == group)).collect();
     let shown_count = only.map_or(shown_total, |group| shown.by_group.get(&group).copied().unwrap_or(0));
-    // The queue moved on while held (not counting what was skipped here).
+    // The queue moved on while held (not counting what was skipped or
+    // played next here).
     let ids = |state: &QueueState| {
-        let waiting: Vec<u64> =
+        let mut waiting: Vec<u64> =
             state.waiting.iter().map(|item| item.id).filter(|id| !skipped_here.contains(id)).collect();
+        for id in next_here.iter() {
+            if let Some(at) = waiting.iter().position(|other| other == id) {
+                let id = waiting.remove(at);
+                waiting.insert(0, id);
+            }
+        }
         (state.on_stage.as_ref().map(|item| item.id), waiting)
     };
     let moved = held.is_some() && ids(&shown) != ids(&queue);
@@ -261,7 +303,7 @@ fn Queue() -> Html {
                 <div class="queue-section">
                     <span class="queue-heading">{ "On stage" }</span>
                     { match &shown.on_stage {
-                        Some(item) => html! { <ul class="queue-list now">{ row(item, None) }</ul> },
+                        Some(item) => html! { <ul class="queue-list now">{ row(item, false) }</ul> },
                         None => html! { <p class="muted small">{ "Nothing." }</p> },
                     } }
                 </div>
@@ -275,7 +317,7 @@ fn Queue() -> Html {
                             </div>
                         }
                         <ol class="queue-list">
-                            { for listed.iter().map(|item| row(item, Some(skip(item.id)))) }
+                            { for listed.iter().map(|item| row(item, true)) }
                         </ol>
                         if shown_count > listed.len() {
                             <p class="muted small">{ format!("and {} more", shown_count - listed.len()) }</p>
@@ -316,16 +358,33 @@ enum Look {
     Gone,
 }
 
+/// A waiting row's buttons: ⤒ (play it next) and ×.
+struct RowButtons {
+    next: (Callback<MouseEvent>, NextButton),
+    skip: Callback<MouseEvent>,
+}
+
+/// How a waiting row's ⤒ looks.
+#[derive(Clone, Copy, PartialEq)]
+enum NextButton {
+    Ready,
+    /// Moved to the front from this list while it held still: lit.
+    Moved,
+    /// The first plays next already: hidden, keeping its place, so the
+    /// row's text doesn't move when another one becomes first.
+    First,
+}
+
 /// A queue item: what it shows or says (with its emotes and text styles),
 /// and under it what it is (in its
 /// colour), whether it's a test or a replay, its event and its card.
-/// `on_skip`: a waiting one's ×. Links in what it shows or says call
-/// `open`.
+/// Links in what it shows or says call `open`.
 fn item_view(
     item: &QueueItem,
-    on_skip: Option<Callback<MouseEvent>>,
+    buttons: Option<RowButtons>,
     look: Look,
     open: &Callback<String>,
+    open_viewer: &Callback<NameColor>,
 ) -> Html {
     // The built-in plugins' effects get colours of their own.
     let kind = match item.label.as_str() {
@@ -344,23 +403,28 @@ fn item_view(
         <li class={classes!("queue-item", (look == Look::Gone).then_some("gone"), (look == Look::Changed).then_some("changed"))}
             key={item.id} data-item={item.id.to_string()}>
             <div class="queue-text">
-                <span class="queue-main">{ looked(&item.text, &item.parts, &item.names, open) }</span>
+                <span class="queue-main">{ looked(&item.text, &item.parts, &item.names, open, open_viewer) }</span>
                 <span class="queue-from">
                     <span class={classes!("kind", kind)}>{ item.label.clone() }</span>
                     if let Some(origin) = origin {
                         { format!(" · {origin}") }
                     }
                     if let Some(event) = &item.event {
-                        { " · " }{ util::with_names(event, &item.names) }
+                        { " · " }{ util::with_names(event, &item.names, Some(open_viewer)) }
                     }
                     if let Some(card) = card {
                         { format!(" · {card}") }
                     }
                 </span>
             </div>
-            if let Some(onclick) = on_skip {
+            if let Some(RowButtons { next: (onclick, next), skip }) = buttons {
+                <button type="button" title="Play this one next" aria-label={format!("Play {} next", item.text)}
+                        class={classes!("queue-next", (next == NextButton::Moved).then_some("on"), (next == NextButton::First).then_some("first"))}
+                        aria-pressed={(next == NextButton::Moved).to_string()} disabled={next == NextButton::First} {onclick}>
+                    { icon("top") }
+                </button>
                 <button type="button" class="queue-skip-one" title="Skip this one"
-                        aria-label={format!("Skip {}", item.text)} {onclick}>{ "×" }</button>
+                        aria-label={format!("Skip {}", item.text)} onclick={skip}>{ "×" }</button>
             }
         </li>
     }
@@ -687,6 +751,7 @@ fn Entry(props: &EntryProps) -> Html {
             panel.send(PanelRequest::OpenLink { from: LinkFrom::Entry(id), url });
         })
     };
+    let open_viewer = super::viewers::opener(&panel);
     let (dot, outcome) = outcome(entry);
     let inline_message = props.message && !entry.message.is_empty();
     // An alert that showed the message shows it, open, as it looked; the
@@ -703,7 +768,7 @@ fn Entry(props: &EntryProps) -> Html {
                         if entry.replay_of.is_some() {
                             <span class="tag replay-tag">{ icon("replay") }{ "Replay" }</span>
                         }
-                        { util::with_names(&entry.summary, &entry.names) }
+                        { util::with_names(&entry.summary, &entry.names, Some(&open_viewer)) }
                     </span>
                     if !outcome.is_empty() {
                         <span class="history-outcome"><span class={classes!("dot", dot)}></span>{ outcome }</span>
@@ -736,7 +801,7 @@ fn Entry(props: &EntryProps) -> Html {
                         <ul class="history-items">
                             { for entry.items.iter().map(|item| html! {
                                 <li key={item.id} data-state={item.state.label()}>
-                                    { looked(&item.text, &item.parts, &entry.names, &open) }
+                                    { looked(&item.text, &item.parts, &entry.names, &open, &open_viewer) }
                                     if item.state != ItemState::Played {
                                         <span class="muted">{ format!(" · {}", item.state.label()) }</span>
                                     }
@@ -803,11 +868,12 @@ fn style_of(style: Option<&TextStyle>) -> Option<String> {
 fn looked(
     text: &str,
     parts: &[TextPart],
-    names: &[protocol::activity::NameColor],
+    names: &[NameColor],
     open: &Callback<String>,
+    open_viewer: &Callback<NameColor>,
 ) -> Html {
     if parts.is_empty() {
-        return util::with_links(text, names, open);
+        return util::with_links(text, names, open, Some(open_viewer));
     }
     html! {
         { for parts.iter().map(|part| match part {
@@ -815,7 +881,7 @@ fn looked(
                 let coloured = style.as_ref().is_some_and(|style| !style.colour.is_empty());
                 html! {
                     <span style={style_of(style.as_ref())}>
-                        { util::with_links(text, if coloured { &[] } else { names }, open) }
+                        { util::with_links(text, if coloured { &[] } else { names }, open, Some(open_viewer)) }
                     </span>
                 }
             }
@@ -847,12 +913,12 @@ fn outcome(entry: &HistoryEntry) -> (&'static str, String) {
 /// The viewer's message, with its emotes. Links call `open`.
 fn message(entry: &HistoryEntry, open: &Callback<String>) -> Html {
     if entry.message_parts.is_empty() {
-        return util::with_links(&entry.message, &[], open);
+        return util::with_links(&entry.message, &[], open, None);
     }
     html! {
         { for entry.message_parts.iter().map(|part| match part {
             AlertPart::Text { text, style } => html! {
-                <span style={style_of(style.as_ref())}>{ util::with_links(text, &[], open) }</span>
+                <span style={style_of(style.as_ref())}>{ util::with_links(text, &[], open, None) }</span>
             },
             AlertPart::Emote { code, sprite, style } => html! {
                 <img class="history-emote" src={sprite.image.path()} alt={code.clone()} title={code.clone()}

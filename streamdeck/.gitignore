@@ -1,6 +1,7 @@
 node_modules/
 test-build/
 dist/
+packing/
 *.sdPlugin/bin
 *.sdPlugin/logs
 *.sdPlugin/ui/settings.js

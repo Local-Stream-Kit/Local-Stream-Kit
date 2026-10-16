@@ -1,15 +1,19 @@
 //! The control API (for a Stream Deck, hotkey tools and scripts), a box on
-//! Status (its own page until 2026-10-14): the key, the link the Stream
-//! Deck plugin is given, and ready-to-copy URLs, folded under "Make a URL".
+//! Status (its own page until 2026-10-14): the key, the Stream Deck plugin
+//! (Install, and the one connected), the address it's given, and
+//! ready-to-copy URLs, folded under "Make a URL".
 
 use protocol::activity::{QueueAction, QueueGroup};
 
 use protocol::control::{self, EffectId, Switch};
 use protocol::panel::PanelRequest;
+use protocol::streamdeck::{self, StreamDeckStatus};
+use protocol::update::{self, AppLink};
 use yew::prelude::*;
 
-use super::boxes::{CopyField, FoldBox};
+use super::boxes::{CopyField, FoldBox, summary};
 use super::icon;
+use super::status::{app_link, capitalised};
 use crate::editor::fields::PickField;
 use crate::{Panel, util};
 
@@ -189,8 +193,17 @@ pub fn ControlBox(props: &ControlBoxProps) -> Html {
         }),
     };
 
+    let deck = &panel.model.status.stream_deck;
+    let head = match deck.connected.first() {
+        Some(version) => summary(
+            if deck.update_offered() { "warn" } else { "ok" },
+            format!("Stream Deck {}", streamdeck::shown(version)),
+        ),
+        None => html! {},
+    };
+
     html! {
-        <FoldBox id="control" title="Control API" open={props.focused}>
+        <FoldBox id="control" title="Control API" summary={head} open={props.focused}>
             <div class="setting-rows">
                 <div class="setting-row tall">
                     <label class="setting-label" for="control-key">{ "Key" }</label>
@@ -208,11 +221,15 @@ pub fn ControlBox(props: &ControlBoxProps) -> Html {
                         <div class="danger-note">{ icon("warn") }{ "Do not show this to anyone" }</div>
                     </div>
                 </div>
+                <div class="setting-row tall noted">
+                    <span class="setting-label">{ "Stream Deck" }</span>
+                    <div class="setting-control">{ stream_deck(&panel, deck) }</div>
+                </div>
                 <div class="setting-row">
-                    <label class="setting-label" for="control-deck">{ "Stream Deck" }</label>
+                    <label class="setting-label" for="control-deck">{ "Address" }</label>
                     <div class="setting-control">
                         <CopyField id="control-deck" value={hidden(&connection)} copies={Some(AttrValue::from(connection.clone()))}
-                                   what="the Stream Deck plugin's link" />
+                                   what="the Stream Deck plugin's address" />
                     </div>
                 </div>
             </div>
@@ -278,5 +295,64 @@ pub fn ControlBox(props: &ControlBoxProps) -> Html {
                 }
             </div>
         </FoldBox>
+    }
+}
+
+/// The Stream Deck plugin: the one connected, and Install (Update when it's
+/// older than the one built in), or, in a build without one, a link to the
+/// release's file.
+fn stream_deck(panel: &Panel, deck: &StreamDeckStatus) -> Html {
+    let mut versions: Vec<&str> = deck.connected.iter().map(|version| streamdeck::shown(version)).collect();
+    versions.dedup();
+    let (dot, state) = match versions.as_slice() {
+        [] => ("off", "Not connected".to_string()),
+        versions => ("ok", format!("{} connected", versions.join(", "))),
+    };
+    let dot = if deck.update_offered() { "warn" } else { dot };
+    let state = html! {
+        <div class="state-line" id="control-deck-state">
+            <span class={classes!("dot", dot)}></span>
+            <span>{ state }</span>
+        </div>
+    };
+    let Some(built_in) = &deck.built_in else {
+        let version = &panel.model.status.version;
+        let href = streamdeck::release_file_url(&update::releases(), version);
+        return html! {
+            <>
+                { state }
+                <div class="state-line">
+                    <span class="muted small" id="control-deck-none">{ "Not in this build:" }</span>
+                    { app_link(panel, "control-deck-download", AppLink::StreamDeckPlugin, href, "Download") }
+                </div>
+            </>
+        };
+    };
+    let install = {
+        let panel = panel.clone();
+        Callback::from(move |_: MouseEvent| {
+            panel.send(PanelRequest::InstallStreamDeck);
+        })
+    };
+    let (label, class) = if deck.update_offered() {
+        (format!("Update to {}", streamdeck::shown(built_in)), "primary")
+    } else if deck.connected.is_empty() {
+        ("Install".to_string(), "primary")
+    } else {
+        ("Install".to_string(), "ghost")
+    };
+    html! {
+        <>
+            { state }
+            <div>
+                <button type="button" class={classes!("button", "small", class)} id="control-deck-install"
+                        onclick={install}>
+                    { icon("download") }{ label }
+                </button>
+            </div>
+            if let Some(error) = &deck.install_error {
+                <span class="small warn-text update-error" id="control-deck-error">{ capitalised(error) }</span>
+            }
+        </>
     }
 }

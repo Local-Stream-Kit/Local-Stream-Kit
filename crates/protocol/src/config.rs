@@ -52,6 +52,35 @@ pub struct AppConfig {
     pub log: LogSettings,
     /// Whether the app looks for a new version.
     pub updates: UpdateSettings,
+    /// What the chat log keeps (each viewer's card in Activity).
+    pub chat_log: ChatLogSettings,
+    /// Notes closed with their ×, so every panel leaves them out.
+    pub closed_notes: ClosedNotes,
+}
+
+/// Notes closed with their × (2026-10-16): they stay closed in every
+/// panel. One about the login and the chat being different channels is
+/// closed for that pair (`"marrtin/vedal987"`, [`ClosedNotes::pair`]), and
+/// shows again for another.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ClosedNotes {
+    /// A viewer card's "Only chat seen while Local Stream Kit was running".
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub chat_log: bool,
+    /// A viewer card's "The Twitch login is for …, not …".
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub card_other_channel: String,
+    /// Status → Twitch's "Chat is set to …, but channel points come from …".
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub login_other_channel: String,
+}
+
+impl ClosedNotes {
+    /// How a login and a chat channel are kept: `"marrtin/vedal987"`.
+    pub fn pair(login: &str, channel: &str) -> String {
+        format!("{}/{}", login.to_lowercase(), channel.to_lowercase())
+    }
 }
 
 /// What the log keeps (in the console and `logs/`).
@@ -62,6 +91,22 @@ pub struct LogSettings {
     /// debug line. Applied while running; `RUST_LOG`, when set, decides
     /// instead.
     pub detailed: bool,
+}
+
+/// What the chat log keeps: every chat message the app sees, in `chat/`,
+/// for the viewers' cards in Activity.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ChatLogSettings {
+    /// Days of chat kept; older days are deleted. No setting in the panel
+    /// yet: only in `lsk.json`.
+    pub keep_days: u32,
+}
+
+impl Default for ChatLogSettings {
+    fn default() -> Self {
+        ChatLogSettings { keep_days: 90 }
+    }
 }
 
 /// Whether the app looks for a new version (Status → About).
@@ -281,6 +326,8 @@ impl Default for AppConfig {
             overlays: Overlay::starters(),
             log: LogSettings::default(),
             updates: UpdateSettings::default(),
+            chat_log: ChatLogSettings::default(),
+            closed_notes: ClosedNotes::default(),
         }
     }
 }
@@ -356,6 +403,74 @@ pub struct Connections {
     /// on the Status page; `channel_points`, their switch until 2026-10-14,
     /// is left out of an old config when it's read.)
     pub twitch_channel: String,
+    /// What the broadcaster's Twitch login may do (Status → Twitch's
+    /// ticks, 2026-10-16): Twitch is asked for these when logging in.
+    pub twitch_permissions: TwitchPermissions,
+}
+
+/// What the broadcaster's Twitch login may do: the ticks in Status →
+/// Twitch. Logging in asks Twitch for these; one ticked that the login
+/// wasn't given needs a new login.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TwitchPermissions {
+    pub channel_points: bool,
+    pub follows: bool,
+    pub hype_train: bool,
+    /// Timeouts, bans, warnings, deleting messages and shoutouts from the
+    /// viewers' cards, and who's subbed, banned, VIP or a mod on them.
+    pub moderating: bool,
+    /// Making viewers VIPs and mods, and taking it back.
+    pub roles: bool,
+}
+
+impl Default for TwitchPermissions {
+    /// The events on; moderating ticked by those who want it.
+    fn default() -> Self {
+        TwitchPermissions {
+            channel_points: true,
+            follows: true,
+            hype_train: true,
+            moderating: false,
+            roles: false,
+        }
+    }
+}
+
+impl TwitchPermissions {
+    /// What both have.
+    pub fn and(self, other: TwitchPermissions) -> TwitchPermissions {
+        TwitchPermissions {
+            channel_points: self.channel_points && other.channel_points,
+            follows: self.follows && other.follows,
+            hype_train: self.hype_train && other.hype_train,
+            moderating: self.moderating && other.moderating,
+            roles: self.roles && other.roles,
+        }
+    }
+
+    /// Whether any of these is in `self` but not in `granted`: a new login
+    /// would give it.
+    pub fn beyond(self, granted: TwitchPermissions) -> bool {
+        self.and(granted) != self
+    }
+
+    /// Whether any of the events (channel points, follows, hype trains) is
+    /// on: they're what EventSub is for.
+    pub fn any_events(self) -> bool {
+        self.channel_points || self.follows || self.hype_train
+    }
+
+    /// All of them, as a login with every permission has.
+    pub fn all() -> TwitchPermissions {
+        TwitchPermissions {
+            channel_points: true,
+            follows: true,
+            hype_train: true,
+            moderating: true,
+            roles: true,
+        }
+    }
 }
 
 impl Default for Connections {
@@ -365,6 +480,7 @@ impl Default for Connections {
             emote_sources: EMOTE_SOURCES.iter().map(|source| source.to_string()).collect(),
             image_cache_max_mb: 512,
             twitch_channel: String::new(),
+            twitch_permissions: TwitchPermissions::default(),
         }
     }
 }

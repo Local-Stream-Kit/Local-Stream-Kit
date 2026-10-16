@@ -204,7 +204,7 @@ impl Effects {
             InputKind::Moderation(Moderation::MessageDeleted { id }) => {
                 PluginMessage::ChatRemoved { id: line_id(platform, id) }
             }
-            InputKind::Moderation(Moderation::UserCleared { user_id }) => {
+            InputKind::Moderation(Moderation::UserCleared { user_id, .. }) => {
                 PluginMessage::ChatUserRemoved { platform: platform.clone(), user_id: user_id.clone() }
             }
             InputKind::Moderation(Moderation::ChatCleared) => {
@@ -501,7 +501,10 @@ pub mod tests {
         effects.chat(&input(InputKind::Message(message("m1", "nightbot", "!so someone"))), &mut ctx);
         effects.chat(&input(InputKind::Moderation(Moderation::MessageDeleted { id: "m1".into() })), &mut ctx);
         effects.chat(
-            &input(InputKind::Moderation(Moderation::UserCleared { user_id: "id-a".into() })),
+            &input(InputKind::Moderation(Moderation::UserCleared {
+                user_id: "id-a".into(),
+                timeout_secs: Some(60),
+            })),
             &mut ctx,
         );
         effects.chat(&input(InputKind::Moderation(Moderation::ChatCleared)), &mut ctx);

@@ -141,7 +141,12 @@ pub enum Moderation {
     /// One message deleted (its [`Message::id`]).
     MessageDeleted { id: String },
     /// A viewer banned or timed out: their messages go.
-    UserCleared { user_id: String },
+    UserCleared {
+        user_id: String,
+        /// A timeout's length; `None`: banned.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        timeout_secs: Option<u64>,
+    },
     /// The whole chat cleared.
     ChatCleared,
 }
