@@ -1,6 +1,6 @@
 /**
  * The Stream Deck plugin for Local Stream Kit's control API: keys that switch
- * cards and effects, run the queue, fire Custom events and mark the history
+ * cards and plugins, run the queue, fire Custom events and mark the history
  * seen, and show what's on. The app's address (with its key) is pasted once, in any key's
  * settings, and kept as the plugin's global setting.
  */
@@ -36,7 +36,7 @@ function pageView(): ToSettingsPage {
 		problem: app.problem,
 		base: app.base ?? "",
 		cards: app.state?.cards ?? [],
-		effects: app.state?.effects ?? [],
+		plugins: app.state?.plugins ?? [],
 		events: app.state?.events ?? [],
 		kinds: app.state?.kinds ?? [],
 	};

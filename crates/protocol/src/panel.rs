@@ -109,6 +109,10 @@ pub enum PanelRequest {
         #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
         settings: serde_json::Map<String, serde_json::Value>,
     },
+    /// A message from a plugin's tab (its page's `send`) to its server
+    /// code (`on-tab`). Dropped while the code isn't running, and past
+    /// [`TAB_MESSAGE_LIMIT`](crate::plugin::TAB_MESSAGE_LIMIT).
+    TabMessage { plugin: String, data: serde_json::Value },
     /// The emotes the chat channel can use, for completing emote codes.
     /// Answered with `Emotes`.
     Emotes,
@@ -344,6 +348,13 @@ pub enum PanelEvent {
             String,
             std::collections::BTreeMap<String, Vec<crate::plugin::Choice>>,
         >,
+    },
+    /// From a plugin's server code (`send-to-tab`) to its tab, in every
+    /// open panel: a panel showing the tab passes it to the page
+    /// (`PluginMessage::Message`), the others drop it.
+    TabMessage {
+        plugin: String,
+        data: serde_json::Value,
     },
     /// The viewers whose name has `text` in it, the most recently seen
     /// first (at most [`FOUND_LIMIT`](crate::viewers::FOUND_LIMIT)).

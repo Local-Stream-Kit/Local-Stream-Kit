@@ -1,14 +1,15 @@
-//! What cards ask plugins' server code while they run: where one of its
-//! flow nodes sends an event on (`route`), and its value nodes' values
-//! for an event (`compute`). A card never waits for the answer: the event
-//! is parked (a flow node's as a run, kept as effect runs are but apart
-//! from them, [`Activity::remember_run`]; one waiting for value nodes as a
+//! What cards ask plugins' server code (or a plugin's program, on the
+//! control API) while they run: where one of its flow nodes sends an event
+//! on (`route`), and its value nodes' values for an event (`compute`). A
+//! card never waits for the answer: the event is parked (a flow node's as
+//! a run, kept as effect runs are but apart from them,
+//! [`Activity::remember_run`]; one waiting for value nodes as a
 //! [`Computing`]) and the answer carries the card on, through the
 //! pipeline's resumes, as a queued effect's Started and Ended do. What a
-//! plugin's server code won't answer because it stopped is let go at once
-//! ([`Activity::unanswered`]).
+//! plugin won't answer because its server code stopped (or its program
+//! went) is let go at once ([`Activity::unanswered`]).
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
 use protocol::activity::ItemOrigin;
@@ -83,6 +84,40 @@ impl HeardQueue {
         let heard = self.waiting.pop_front();
         self.woken = !self.waiting.is_empty();
         (heard, self.woken)
+    }
+}
+
+/// How many runs a plugin may leave unanswered, of its flow nodes and of
+/// its value nodes ([`Pending`]).
+const MAX_PENDING: usize = 1000;
+
+/// Runs a plugin was asked about and answers later (server code's
+/// `route-later` and `compute-later`, a program's every answer), with
+/// their node, oldest first: at most [`MAX_PENDING`], the oldest forgotten.
+#[derive(Default)]
+pub struct Pending(BTreeMap<u64, String>);
+
+impl Pending {
+    pub fn park(&mut self, run: u64, node: &str) {
+        self.0.insert(run, node.to_string());
+        while self.0.len() > MAX_PENDING {
+            self.0.pop_first();
+        }
+    }
+
+    /// Run `run`'s node, if it waits.
+    pub fn node(&self, run: u64) -> Option<&str> {
+        self.0.get(&run).map(String::as_str)
+    }
+
+    /// Run `run`'s node, if it waits; it no longer does.
+    pub fn take(&mut self, run: u64) -> Option<String> {
+        self.0.remove(&run)
+    }
+
+    /// Every run waiting; none from now.
+    pub fn drain(&mut self) -> impl Iterator<Item = u64> + use<> {
+        std::mem::take(&mut self.0).into_keys()
     }
 }
 

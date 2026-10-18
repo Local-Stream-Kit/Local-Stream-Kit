@@ -3,7 +3,7 @@ members = ["crates/protocol", "crates/server", "crates/overlay", "crates/panel",
 resolver = "3"
 
 [workspace.package]
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 publish = false
 license-file = "LICENSE.md"
@@ -13,6 +13,41 @@ license-file = "LICENSE.md"
 # local variables. Comment it out for a debugging session.
 [profile.dev]
 debug = "line-tables-only"
+
+# A debug server reads the pages it serves from disk on each request and
+# hashes them (rust-embed): unoptimised, the panel's 20 MB .wasm took
+# 0.7 s, over 3 s with four e2e tests at once.
+[profile.dev.package.sha2]
+opt-level = 3
+
+# Plugins' server code is compiled by wasmtime's Cranelift when it starts:
+# unoptimised, OBS's took 1.0 s (2 to 3 s with four e2e tests at once),
+# optimised 0.1 s (77 ms in release). Changing these rebuilds wasmtime
+# and the app, about 2 minutes.
+[profile.dev.package.cranelift-codegen]
+opt-level = 3
+[profile.dev.package.cranelift-assembler-x64]
+opt-level = 3
+[profile.dev.package.cranelift-frontend]
+opt-level = 3
+[profile.dev.package.cranelift-entity]
+opt-level = 3
+[profile.dev.package.cranelift-bforest]
+opt-level = 3
+[profile.dev.package.cranelift-bitset]
+opt-level = 3
+[profile.dev.package.cranelift-control]
+opt-level = 3
+[profile.dev.package.cranelift-codegen-shared]
+opt-level = 3
+[profile.dev.package.regalloc2]
+opt-level = 3
+[profile.dev.package.wasmtime-internal-cranelift]
+opt-level = 3
+[profile.dev.package.wasmtime-environ]
+opt-level = 3
+[profile.dev.package.wasmparser]
+opt-level = 3
 
 [workspace.dependencies]
 protocol = { path = "crates/protocol" }

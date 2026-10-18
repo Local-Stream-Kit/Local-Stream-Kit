@@ -98,13 +98,19 @@ export class App {
 				socket.close();
 				return;
 			}
+			if (message.state.version < CONTROL_VERSION) {
+				this.state = undefined;
+				this.#set("too-old", "Local Stream Kit is older than this plugin: update Local Stream Kit.");
+				socket.close();
+				return;
+			}
 			this.state = message.state;
 			this.#set("connected", "");
 		});
 		socket.addEventListener("close", () => {
 			if (!current()) return;
 			this.state = undefined;
-			if (this.connection === "too-new") return;
+			if (this.connection === "too-new" || this.connection === "too-old") return;
 			if (opened) {
 				this.#set("connecting", "Local Stream Kit went away; trying again.");
 				this.#later();

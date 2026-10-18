@@ -90,7 +90,7 @@ socket.addEventListener("message", (event) => {
     case "error":
       console.error(`The app says: ${message.error} (${message.status})`);
       break;
-    // "state" (cards, effects, the queue) and "emitted" aren't needed here.
+    // "state" (cards, plugins, the queue) and "emitted" aren't needed here.
   }
 });
 socket.addEventListener("close", () => {

@@ -876,7 +876,7 @@ impl CardRuntime {
                 // plugin's own settings are.
                 let mut rng = ctx.rng_at(&self.card.id, to);
                 let media = ctx.media;
-                let mut pick = |kind, folder: &str| media.pick(kind, folder, &mut *rng);
+                let mut pick = |kind, folder: &str, every| media.pick_files(kind, folder, every, &mut *rng);
                 let changes = ty
                     .changeable
                     .iter()
@@ -942,7 +942,8 @@ impl CardRuntime {
         for input in &ty.inputs {
             let is_wired = wired(&input.name);
             // A setting standing in for it that isn't shown now isn't sent.
-            if !is_wired && ty.setting(&input.name).is_some_and(|setting| !ty.shown(setting, wired)) {
+            if !is_wired && ty.setting(&input.name).is_some_and(|setting| !ty.shown(setting, wired, settings))
+            {
                 continue;
             }
             let value = match input.ty {
@@ -967,7 +968,7 @@ impl CardRuntime {
             }
         }
         let mut rng = ctx.rng_at(&self.card.id, node);
-        for setting in ty.own_settings().filter(|setting| ty.shown(setting, wired)) {
+        for setting in ty.own_settings().filter(|setting| ty.shown(setting, wired, settings)) {
             let value = setting_value(setting, settings.get(&setting.key), activation, ctx, &mut *rng);
             values.insert(setting.key.clone(), value);
         }
@@ -1606,8 +1607,8 @@ fn setting_value(
             let text = fill(template, |name| activation.values.get(name).map(Value::text), activation, ctx);
             plugins::text_value(&text)
         }
-        _ => protocol::plugin::shared_value(setting, stored, &mut |kind, folder| {
-            ctx.media.pick(kind, folder, rng)
+        _ => protocol::plugin::shared_value(setting, stored, &mut |kind, folder, every| {
+            ctx.media.pick_files(kind, folder, every, rng)
         }),
     }
 }
@@ -2502,6 +2503,28 @@ mod tests {
         let runs = plugin_runs(&run_in(card, &[(0, bits(50))], &[0.99], &media));
         assert_eq!(runs[0]["values"]["picture"], "/pictures/alerts%2Fb%2Epng");
         assert_eq!(runs[0]["values"]["ding"], serde_json::Value::Null);
+
+        // A setting with many: every file in the folder; shown (and sent)
+        // only while From is Top.
+        let mut burst = confetti().node_kinds().remove(0);
+        if let NodeKind::Plugin { settings, .. } = &mut burst {
+            settings.insert("pictures".into(), "alerts/".into());
+        }
+        let card = card_of(
+            vec![(1, NodeKind::Bits { min: 0.0 }), (3, burst.clone())],
+            &[(1, "event", 3, "trigger")],
+        );
+        let runs = plugin_runs(&run_in(card, &[(0, bits(50))], &[0.99], &media));
+        assert_eq!(runs[0]["values"].get("pictures"), None, "From is Bottom: not shown");
+        if let NodeKind::Plugin { settings, .. } = &mut burst {
+            settings.insert("from".into(), "top".into());
+        }
+        let card = card_of(vec![(1, NodeKind::Bits { min: 0.0 }), (3, burst)], &[(1, "event", 3, "trigger")]);
+        let runs = plugin_runs(&run_in(card, &[(0, bits(50))], &[0.99], &media));
+        assert_eq!(
+            runs[0]["values"]["pictures"],
+            serde_json::json!(["/pictures/alerts%2Fa%2Egif", "/pictures/alerts%2Fb%2Epng"])
+        );
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -3272,7 +3295,9 @@ mod tests {
                       "options": [{ "value": "bottom", "label": "Bottom" }, { "value": "top", "label": "Top" }] },
                     { "key": "shout", "label": "Shout", "type": "text", "default": "{amount} bits {e:Kappa}" },
                     { "key": "picture", "label": "Picture", "type": "picture" },
-                    { "key": "ding", "label": "Sound", "type": "sound", "default": "ding.mp3" }
+                    { "key": "ding", "label": "Sound", "type": "sound", "default": "ding.mp3" },
+                    { "key": "pictures", "label": "Pictures", "type": "picture", "many": true,
+                      "when": { "is": { "from": "top" } } }
                 ]
             }]
         }))

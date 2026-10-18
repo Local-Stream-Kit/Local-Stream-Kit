@@ -99,6 +99,10 @@ pub struct Model {
     pub plugin_failures: Rc<Vec<PluginFailure>>,
     /// Why a plugin couldn't be removed or forgotten, for the Plugins page.
     pub plugin_problem: Option<String>,
+    /// What plugins' server code last sent their tabs, numbered, at most
+    /// [`TAB_MESSAGES_KEPT`]: the open tab passes on the ones after the
+    /// last it passed.
+    pub tab_messages: Rc<VecDeque<TabMessage>>,
     /// The viewer card open in Activity.
     pub viewer: Option<Rc<ViewerState>>,
     /// The card asked for and not here yet: its id, else the name typed
@@ -147,6 +151,7 @@ impl Default for Model {
             plugins: Rc::default(),
             plugin_failures: Rc::default(),
             plugin_problem: None,
+            tab_messages: Rc::default(),
             viewer: None,
             opening: None,
             found: Rc::default(),
@@ -177,6 +182,19 @@ impl Model {
 
 /// A change to the config.
 pub type Change = Rc<dyn Fn(&mut AppConfig)>;
+
+/// A message from a plugin's server code to its tab.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TabMessage {
+    /// One more than the message before it's.
+    pub number: u64,
+    pub plugin: String,
+    pub data: serde_json::Value,
+}
+
+/// The most messages to tabs kept: more than ever come between two
+/// renders.
+const TAB_MESSAGES_KEPT: usize = 64;
 
 /// The viewer card open in Activity, and what's going on with it.
 #[derive(Debug, Clone, PartialEq)]
@@ -432,6 +450,14 @@ impl Reducible for Model {
                     .map(|problem| format!("Couldn't {} {}: {problem}", action.verb(), viewer.card.name));
             }
             Action::Server(PanelEvent::PluginOptions { options }) => model.plugin_options = Rc::new(options),
+            Action::Server(PanelEvent::TabMessage { plugin, data }) => {
+                let messages = Rc::make_mut(&mut model.tab_messages);
+                let number = messages.back().map_or(1, |last| last.number + 1);
+                messages.push_back(TabMessage { number, plugin, data });
+                if messages.len() > TAB_MESSAGES_KEPT {
+                    messages.pop_front();
+                }
+            }
             Action::QueueNoteClosed => model.queue_note = None,
             Action::FileDraft { plugin, key, draft } => {
                 let drafts = Rc::make_mut(&mut model.file_drafts);

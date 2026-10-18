@@ -4,13 +4,14 @@
 //
 // The app calls the plugin one thing at a time (`start`, an effect node's
 // `run`, a flow node's `route`, a value node's `compute`, the chat and the
-// events it hears, a timer, a web answer, a socket message), each within a
+// events it hears, a message from its tab in the panel, a timer, a web
+// answer, a socket message), each within a
 // time limit, and does all the waiting itself: nothing here blocks, so a
 // plugin needs no async. A card never waits on a plugin either: an event
 // that reaches a plugin's flow or value node waits for its answer while
 // the cards carry on with other events. Web requests and sockets only
 // reach the hosts listed in the plugin's `plugin.json` (`hosts`).
-package lsk:plugin@0.5.0;
+package lsk:plugin@0.6.0;
 
 interface types {
     /// An emote: its code, its image's path on the app (`/emote/…`), and
@@ -277,6 +278,17 @@ interface host {
     /// `{ "type": "message", "data": … }`. `json` must be JSON.
     send-to-page: func(json: string);
 
+    /// Sends a message to the plugin's tab (its manifest's `tab`) in every
+    /// open panel; a panel showing it gives it to the page as
+    /// `{ "type": "message", "data": … }`, the others drop it. `json` must
+    /// be JSON.
+    send-to-tab: func(json: string);
+
+    /// The number on the plugin's tab ("Requests (2)"), for a tab whose
+    /// manifest has `count`; 0 shows none. Cleared when the plugin stops
+    /// or starts again.
+    set-tab-count: func(count: u32);
+
     /// Calls `on-timer` with the returned id after `ms` milliseconds (at
     /// least 10), and every `ms` if `repeat`.
     set-timer: func(ms: u32, repeat: bool) -> u32;
@@ -438,6 +450,11 @@ world plugin {
     /// and again when the cards change them (one added or removed, its
     /// settings changed, its card switched on or off).
     export nodes-changed: func(nodes: list<placed-node>);
+
+    /// A message from the plugin's tab in the panel (its page's `send`),
+    /// as JSON. Answer with `host.send-to-tab`: every open panel's tab gets
+    /// it.
+    export on-tab: func(json: string);
 
     export on-timer: func(id: u32);
     export on-response: func(id: u32, response: result<response, string>);

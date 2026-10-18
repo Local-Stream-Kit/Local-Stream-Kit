@@ -5,6 +5,7 @@
   "api": 1,
   "description": "For the e2e tests: tries each thing the app offers server code, and reports back with its Result event.",
   "icon": "icon.svg",
+  "tab": { "label": "Checks", "page": "tab.html", "count": true },
   "hosts": [
     "127.0.0.1"
   ],

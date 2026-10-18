@@ -117,10 +117,33 @@ input[type="checkbox"] { accent-color: var(--accent-line); }
 .dots { display: flex; gap: 10px; color: var(--muted); font-size: 12px; }
 .dots:hover { color: var(--text); }
 .dot-label { display: inline-flex; align-items: center; }
-.tabs { display: flex; gap: 2px; }
-.tab { padding: 8px 12px; color: var(--muted); border-bottom: 2px solid transparent; }
+.tabs { position: relative; display: flex; gap: 2px; }
+.tab { flex: none; padding: 8px 12px; color: var(--muted); border-bottom: 2px solid transparent; white-space: nowrap; }
 .tab:hover { color: var(--text); }
 .tab.current { color: #fff; border-bottom-color: var(--accent-line); font-weight: 500; }
+/* What doesn't fit, under ⋯ (tab_row.rs). */
+.tab.more { position: relative; display: flex; align-items: center; padding: 8px 10px; border: 0; border-bottom: 2px solid transparent; background: none; font: inherit; color: var(--muted); }
+.tab.more:hover, .tab.more.open { color: var(--text); }
+.tab.more.open { background: #33343c; border-radius: 6px 6px 0 0; }
+.tab.more.current { color: #fff; border-bottom-color: var(--accent-line); }
+.more-dot { position: absolute; top: 6px; right: 5px; width: 7px; height: 7px; border-radius: 50%; background: var(--accent-line); box-shadow: 0 0 0 2px var(--header); }
+.tabs-more { display: flex; }
+.tabs-menu { min-width: 190px; }
+.tabs-menu .menu-item .grow { flex: 1; }
+.tabs-menu .menu-item.current { color: #fff; font-weight: 500; }
+.tabs-menu .menu-item .icon { color: var(--accent-line); }
+.menu-sep { height: 1px; margin: 4px 0; background: var(--border-strong); }
+/* Every tab at its widest, measured, never seen. */
+.tabs-measure-box { position: absolute; left: 0; top: 0; width: 0; height: 0; overflow: hidden; visibility: hidden; pointer-events: none; }
+.tabs-measure { width: max-content; }
+.tabs-measure > * { flex: none; }
+.tabs-measure > .tab { font-weight: 500; }
+/* A plugin's tab: its page fills the rest of the dock. */
+.dock.tab-open { height: 100%; }
+.tab-main { flex: 1; min-height: 0; display: flex; flex-direction: column; width: 100%; max-width: 760px; margin: 0 auto; }
+.tab-notice { margin: 14px 10px 0; }
+.tab-notice a { color: #f6e2a8; text-decoration: underline; }
+.tab-frame { flex: 1; min-height: 0; width: 100%; border: 0; display: block; background: transparent; }
 .dock-main { flex: 1; width: 100%; max-width: 760px; margin: 0 auto; }
 
 .banner { padding: 8px 14px; font-size: 12px; border-bottom: 1px solid var(--border); }

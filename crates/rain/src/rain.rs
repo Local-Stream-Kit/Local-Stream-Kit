@@ -30,6 +30,17 @@ const WALL_METRES: f32 = 1.0;
 /// How far above the screen the side walls reach, so emotes spawned above the
 /// top edge stay inside.
 const WALL_ABOVE_METRES: f32 = 20.0;
+/// Collision groups: emotes that pile up meet the floor, the walls and each
+/// other; emotes that fall off the bottom meet only the walls and each other,
+/// so they fall past the floor and past the pile.
+const FLOOR: Group = Group::GROUP_1;
+const WALLS: Group = Group::GROUP_2;
+const PILING: Group = Group::GROUP_3;
+const FALLING: Group = Group::GROUP_4;
+
+fn groups(memberships: Group, filter: Group) -> InteractionGroups {
+    InteractionGroups::new(memberships, filter, InteractionTestMode::And)
+}
 
 /// One emote to rain: its image's path on the app, and the zero-width
 /// emotes drawn on top of it.
@@ -191,15 +202,16 @@ impl Rain {
         let tall = (height + WALL_ABOVE_METRES) / 2.0;
         let middle = (height - WALL_ABOVE_METRES) / 2.0;
         let walls = [
-            // floor, left, right
-            (Vector::new(width / 2.0, height - inset + half), width / 2.0 + WALL_METRES, half),
-            (Vector::new(inset - half, middle), half, tall),
-            (Vector::new(width - inset + half, middle), half, tall),
+            (Vector::new(width / 2.0, height - inset + half), width / 2.0 + WALL_METRES, half, FLOOR),
+            (Vector::new(inset - half, middle), half, tall, WALLS),
+            (Vector::new(width - inset + half, middle), half, tall, WALLS),
         ];
-        for (position, half_width, half_height) in walls {
+        for (position, half_width, half_height, group) in walls {
             let (body, _) = self.world.insert(
                 RigidBodyBuilder::fixed().translation(position),
-                ColliderBuilder::cuboid(half_width, half_height).friction(self.settings.friction as f32),
+                ColliderBuilder::cuboid(half_width, half_height)
+                    .friction(self.settings.friction as f32)
+                    .collision_groups(groups(group, Group::ALL)),
             );
             self.walls.push(body);
         }
@@ -300,7 +312,12 @@ impl Rain {
         let collider = ColliderBuilder::round_cuboid(half_width - radius, half_height - radius, radius)
             .mass_properties(MassProperties::new(centre_of_mass, uniform.mass(), uniform.principal_inertia()))
             .restitution(own.restitution as f32)
-            .friction(own.friction as f32);
+            .friction(own.friction as f32)
+            .collision_groups(if own.fall_through {
+                groups(FALLING, WALLS | FALLING)
+            } else {
+                groups(PILING, FLOOR | WALLS | PILING)
+            });
         let (body, _) = self.world.insert(body, collider);
 
         let mut elements = Vec::new();
@@ -341,16 +358,22 @@ impl Rain {
         }
     }
 
-    /// Starts fading emotes past their lifetime; removes faded ones.
+    /// Starts fading emotes past their lifetime; removes faded ones and ones
+    /// that fell off the bottom.
     fn age(&mut self, now_ms: f64) {
         for emote in &mut self.falling {
             if emote.fade_from_ms.is_none() && now_ms - emote.spawned_ms >= emote.lifetime_ms {
                 emote.fade_from_ms = Some(now_ms);
             }
         }
+        let bottom = self.size.1;
         let world = &mut self.world;
         self.falling.retain(|emote| {
-            let done = emote.fade_from_ms.is_some_and(|from| now_ms - from >= emote.fade_ms);
+            let fell_off = bottom > 0.0
+                && world.bodies.get(emote.body).is_some_and(|body| {
+                    f64::from(body.translation().y) * PX_PER_METRE - emote.width.max(emote.height) > bottom
+                });
+            let done = fell_off || emote.fade_from_ms.is_some_and(|from| now_ms - from >= emote.fade_ms);
             if done {
                 world.remove_body(emote.body);
                 for element in &emote.elements {

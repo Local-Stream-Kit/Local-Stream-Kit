@@ -105,12 +105,13 @@ export class CardAction extends ControlAction<CardSettings> {
 	}
 }
 
+/** Plugin on / off. */
 @action({ UUID: `${PLUGIN_UUID}.effect` })
 export class EffectAction extends ControlAction<EffectSettings> {
 	readonly kind = "effect";
 
 	protected path(settings: EffectSettings): string | undefined {
-		return settings.effect ? paths.effect(settings.effect, settings.set ?? "toggle") : undefined;
+		return settings.effect ? paths.plugin(settings.effect, settings.set ?? "toggle") : undefined;
 	}
 }
 

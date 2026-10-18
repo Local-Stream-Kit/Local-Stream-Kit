@@ -2,7 +2,7 @@
 //! (and so the wires) are computed here rather than measured in the page.
 
 use protocol::cards::{Card, Category, Node, NodeKind, Socket, SocketType};
-use protocol::plugin::{Setting as PluginSetting, SettingKind};
+use protocol::plugin::{Setting as PluginSetting, SettingKind, When};
 
 pub const HEADER: f64 = 30.0;
 const PAD_TOP: f64 = 6.0;
@@ -259,8 +259,7 @@ pub fn rows(node: &Node, card: &Card) -> Vec<Row> {
             // Settings shown only while an input is or isn't wired go under
             // that input instead; "Wait in the queue" and the style picker
             // go last.
-            for (index, each) in plugin_settings(kind, |each| each.when.is_none() && !goes_last(each), wired)
-            {
+            for (index, each) in plugin_settings(kind, |each| !about_input(each) && !goes_last(each), wired) {
                 rows.push(setting(Setting::Plugin(index), plugin_setting_height(each)));
                 for pick in 0..plugin_picks(kind, each) {
                     rows.push(setting(Setting::PluginPick(index, pick), FIELD_ROW));
@@ -275,10 +274,10 @@ pub fn rows(node: &Node, card: &Card) -> Vec<Row> {
     // A plugin's "Wait in the queue", under all its fields (asked,
     // 2026-10-15), then its style picker, with the settings it changes for
     // this node.
-    for (index, each) in plugin_settings(kind, |each| each.when.is_none() && is_queue(each), wired) {
+    for (index, each) in plugin_settings(kind, |each| !about_input(each) && is_queue(each), wired) {
         rows.push(setting(Setting::Plugin(index), plugin_setting_height(each)));
     }
-    for (index, _) in plugin_settings(kind, |each| each.when.is_none() && is_preset(each), wired) {
+    for (index, _) in plugin_settings(kind, |each| !about_input(each) && is_preset(each), wired) {
         rows.push(setting(Setting::Plugin(index), FIELD_ROW));
     }
     // Effects: the settings this node changes, last.
@@ -343,7 +342,7 @@ fn input_rows(kind: &NodeKind, socket: Socket, wired: impl Fn(&str) -> bool + Co
     {
         rows.push(setting(Setting::PluginCodes(index), FIELD_ROW));
     }
-    let about = |each: &PluginSetting| each.when.as_ref().is_some_and(|when| when.input() == name);
+    let about = |each: &PluginSetting| each.when.as_ref().and_then(When::input) == Some(name.as_str());
     for (index, each) in plugin_settings(kind, about, wired) {
         rows.push(setting(Setting::Plugin(index), plugin_setting_height(each)));
     }
@@ -363,6 +362,12 @@ fn is_queue(setting: &PluginSetting) -> bool {
 /// The plugin settings shown after the node's inputs.
 fn goes_last(setting: &PluginSetting) -> bool {
     is_preset(setting) || is_queue(setting)
+}
+
+/// A plugin setting shown only while an input is or isn't wired: it goes
+/// under that input.
+fn about_input(setting: &PluginSetting) -> bool {
+    setting.when.as_ref().and_then(When::input).is_some()
 }
 
 /// Outputs and the inputs right under them that have no field share rows,
@@ -404,18 +409,18 @@ fn pair(rows: Vec<Row>, width: f64) -> Vec<Row> {
 }
 
 /// A plugin node's own settings (not standing in for an input) that pass
-/// `pick` and are shown with these inputs wired, by index.
+/// `pick` and are shown with these inputs wired and its settings, by index.
 fn plugin_settings(
     kind: &NodeKind,
     pick: impl Fn(&PluginSetting) -> bool,
     wired: impl Fn(&str) -> bool + Copy,
 ) -> Vec<(usize, &PluginSetting)> {
-    let Some(ty) = kind.plugin_type() else { return Vec::new() };
+    let (Some(ty), NodeKind::Plugin { settings, .. }) = (kind.plugin_type(), kind) else { return Vec::new() };
     ty.settings
         .iter()
         .enumerate()
         .filter(|(_, each)| ty.own_settings().any(|own| own.key == each.key))
-        .filter(|(_, each)| pick(each) && ty.shown(each, wired))
+        .filter(|(_, each)| pick(each) && ty.shown(each, wired, settings))
         .collect()
 }
 
@@ -435,8 +440,8 @@ fn plugin_setting_height(setting: &PluginSetting) -> f64 {
 /// Whether a plugin node's setting standing in for this input isn't shown
 /// now (so the input has no field).
 pub fn plugin_input_hidden(kind: &NodeKind, input: &str, wired: impl Fn(&str) -> bool) -> bool {
-    let Some(ty) = kind.plugin_type() else { return false };
-    ty.setting(input).is_some_and(|setting| !ty.shown(setting, wired))
+    let (Some(ty), NodeKind::Plugin { settings, .. }) = (kind.plugin_type(), kind) else { return false };
+    ty.setting(input).is_some_and(|setting| !ty.shown(setting, wired, settings))
 }
 
 /// A plugin node's emotes setting standing in for this input: its index,

@@ -95,14 +95,22 @@ fn media_options(
 }
 
 /// A file for a value naming a folder (`"alerts/"`), as a setting gets
-/// one (`"alerts/hype.gif"`): the first, or one at random; other values as
-/// they are. `None` for a folder with none.
-pub fn file_from(value: &str, folders: &[MediaFolder], kind: MediaKind, random: bool) -> Option<String> {
+/// one (`"alerts/hype.gif"`): one at random; other values as they are.
+/// `None` for a folder with none.
+pub fn file_from(value: &str, folders: &[MediaFolder], kind: MediaKind) -> Option<String> {
     let Some(name) = media_folder(value) else { return Some(value.to_string()) };
-    let folder = folders.iter().find(|folder| folder.name == name)?;
-    let files: Vec<&String> = folder.files.iter().filter(|file| kind.takes(file)).collect();
-    let index = if random { (js_sys::Math::random() * files.len() as f64) as usize } else { 0 };
-    files.get(index.min(files.len().saturating_sub(1))).map(|file| format!("{name}/{file}"))
+    let files = preview_files(name, folders, kind, true);
+    let index = (js_sys::Math::random() * files.len() as f64) as usize;
+    files.get(index.min(files.len().saturating_sub(1))).cloned()
+}
+
+/// Files for a preview's setting naming a folder (as `PickFile` gives
+/// them): the first, so the preview holds still, or with `every` all of
+/// them.
+pub fn preview_files(folder: &str, folders: &[MediaFolder], kind: MediaKind, every: bool) -> Vec<String> {
+    let Some(found) = folders.iter().find(|found| found.name == folder) else { return Vec::new() };
+    let files = found.files.iter().filter(|file| kind.takes(file)).map(|file| format!("{folder}/{file}"));
+    if every { files.collect() } else { files.take(1).collect() }
 }
 
 #[derive(Properties, PartialEq)]
@@ -165,7 +173,7 @@ pub fn SoundPick(props: &SoundPickProps) -> Html {
     let play = {
         let (value, volume, folders) = (value.clone(), props.volume, panel.model.sound_folders.clone());
         Callback::from(move |_| {
-            if let Some(file) = file_from(&value, &folders, MediaKind::Sound, true) {
+            if let Some(file) = file_from(&value, &folders, MediaKind::Sound) {
                 preview(&file, volume);
             }
         })

@@ -1,0 +1,63 @@
+/* The control panel's look, for plugins' tab pages:
+   <link rel="stylesheet" href="/plugin-tab.css">
+   Its colours as variables, the page's ground and type, plain buttons and
+   fields, and a few classes (box, row, muted). The font is the system's. */
+:root {
+  color-scheme: dark;
+  --ground: #1f2026;
+  --panel: #2a2b32;
+  --raised: #33343c;
+  --field: #17181d;
+  --border: #383943;
+  --border-strong: #44454f;
+  --text: #e6e6ea;
+  --muted: #a9aab3;
+  --faint: #8b8c96;
+  --accent: #3d68d8;
+  --accent-line: #5b84f0;
+  --link: #8fb0ff;
+  --ok: #4cc38a;
+  --warn: #e8b04a;
+  --error: #ff6b6b;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  padding: 14px 10px; background: var(--ground); color: var(--text);
+  font-family: system-ui, sans-serif; font-size: 13px; line-height: 1.35;
+}
+a { color: var(--link); text-decoration: none; }
+a:hover { color: #b8ccff; }
+h1 { margin: 0; font-size: 15px; font-weight: 600; }
+h2 { margin: 0; font-size: 12.5px; font-weight: 600; }
+p { margin: 0; }
+button, input, select, textarea { font: inherit; }
+button {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 32px;
+  padding: 0 12px; border-radius: 6px; border: 0; background: #3a3b45; color: #ededf1;
+  font-weight: 500; white-space: nowrap; cursor: pointer;
+}
+button:hover { background: #44454f; color: #fff; }
+button:disabled { opacity: 0.45; cursor: default; }
+button.primary { background: var(--accent); color: #fff; }
+button.primary:hover { background: #4874e6; }
+button.ghost { background: transparent; border: 1px solid var(--border-strong); color: #c9cad2; }
+button.ghost:hover { background: #2f3038; }
+button.danger { background: #5a2f36; color: #ffd0d0; }
+button.danger:hover { background: #6c3640; }
+button.small { height: 28px; padding: 0 10px; font-size: 12px; }
+input, select, textarea {
+  height: 32px; padding: 0 9px; border-radius: 6px; border: 1px solid var(--border-strong);
+  background: var(--field); color: #ededf1; min-width: 0;
+}
+input[type="checkbox"], input[type="radio"], input[type="range"] { height: auto; padding: 0; accent-color: var(--accent-line); }
+textarea { height: auto; padding: 6px 8px; resize: vertical; }
+input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-visible, a:focus-visible {
+  outline: 2px solid var(--accent-line); outline-offset: 1px;
+}
+.box {
+  display: flex; flex-direction: column; gap: 10px; padding: 12px 14px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+}
+.row { display: flex; align-items: center; gap: 8px; }
+.muted { color: var(--muted); }

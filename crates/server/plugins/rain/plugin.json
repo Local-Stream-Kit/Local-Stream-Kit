@@ -33,6 +33,7 @@
       "unit": "metres_per_second_squared", "step": 0.1, "slider": true, "group": "Physics" },
     { "key": "bottom_weight", "label": "Weight towards the bottom", "short": "Bottom-heavy",
       "type": "number", "default": 0.8, "min": 0, "max": 1, "unit": "percent", "step": 0.05, "slider": true, "group": "Physics" },
+    { "key": "fall_through", "label": "Fall off the bottom", "type": "bool", "default": false, "group": "Physics" },
     { "key": "lifetime_ms", "label": "Lifetime", "type": "number", "default": 8000, "min": 1000, "max": 120000,
       "unit": "ms", "step": 500, "slider": true, "group": "Timing and limits" },
     { "key": "fade_ms", "label": "Fade-out", "type": "number", "default": 1000, "min": 0, "max": 10000,
@@ -66,7 +67,7 @@
           ] }
       ],
       "changes": ["restitution", "friction", "gravity", "emote_height_px", "size_variation", "overlap",
-                  "bottom_weight", "corner_rounding", "lifetime_ms", "fade_ms"]
+                  "bottom_weight", "corner_rounding", "lifetime_ms", "fade_ms", "fall_through"]
     }
   ]
 }

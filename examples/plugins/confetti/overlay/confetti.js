@@ -18,14 +18,18 @@ let pieces = [];
 let running = false;
 let last = 0;
 
-function resize() {
+// The canvas matches the page, checked every frame: in an iframe (as the
+// overlay and the control panel's preview host this page) the page's size
+// can arrive after this script has run, with no resize event.
+function fit() {
   const ratio = window.devicePixelRatio || 1;
-  canvas.width = Math.round(innerWidth * ratio);
-  canvas.height = Math.round(innerHeight * ratio);
+  const width = Math.round(innerWidth * ratio);
+  const height = Math.round(innerHeight * ratio);
+  if (canvas.width === width && canvas.height === height) return;
+  canvas.width = width;
+  canvas.height = height;
   context.setTransform(ratio, 0, 0, ratio, 0, 0);
 }
-addEventListener("resize", resize);
-resize();
 
 // Only messages from the overlay itself: other plugins' pages could send
 // some too.
@@ -101,6 +105,7 @@ function frame(now) {
   const dt = Math.max(0, Math.min(0.05, (now - last) / 1000));
   last = now;
   const kept = Math.pow(AIR, dt);
+  fit();
   context.clearRect(0, 0, innerWidth, innerHeight);
   pieces = pieces.filter((piece) => {
     piece.age += dt;

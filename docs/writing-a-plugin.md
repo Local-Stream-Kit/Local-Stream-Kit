@@ -17,6 +17,7 @@ server code, and one of the examples below.
 - [Nodes](#nodes)
 - [Settings](#settings)
 - [Overlay pages](#overlay-pages)
+- [A tab in the panel](#a-tab-in-the-panel)
 - [Server code](#server-code)
 - [Programs](#programs)
 - [Examples to start from](#examples-to-start-from)
@@ -39,6 +40,11 @@ With server code, the effect nodes' runs go to the server code, and the
 server code decides what the page shows (`send-to-page`). Without it, they
 go straight to the page.
 
+A plugin in a folder can also have a **tab of its own in the panel**: a
+page that talks to its server code, for what the streamer does during a
+stream (a list of requests to approve, counts to set right). See
+[A tab in the panel](#a-tab-in-the-panel).
+
 ## The folder
 
 ```
@@ -47,6 +53,7 @@ plugins/                  next to lsk.json, in the folder the app runs from
     plugin.json           the manifest (required)
     overlay/              served at /plugins/my-plugin/ (optional)
       index.html          the overlay page
+      tab.html            a tab in the panel, if it has one (any name)
       …                   its scripts, styles, pictures, sounds
     server.wasm           server code (optional)
 ```
@@ -165,8 +172,9 @@ plugin:
 | `own_source` | | `true` for a page that needs a Browser Source of its own (as the chat display does): an overlay showing "every effect" leaves it out, and only one that names it shows it. |
 | `hosts` | | Hosts its server code may reach ([Permissions](#permissions)). |
 | `page_hosts` | | Hosts its overlay page may load from ([Permissions](#permissions)). |
-| `hears` | | `["chat"]`: its page and its server code get every chat message; `["events"]`: its server code gets every event ([Permissions](#permissions)). |
+| `hears` | | `["chat"]`: its page and its server code (or program) get every chat message; `["events"]`: its server code (or program) gets every event ([Permissions](#permissions)). |
 | `voices` | | Text to speech voices, `[{ "id": "beeps", "name": "Beeps" }]` ([Voices](#voices)). |
+| `tab` | | A tab of its own in the panel, `{ "label": "Requests", "page": "tab.html", "count": true }` ([A tab in the panel](#a-tab-in-the-panel)). Not for a program. |
 
 ### Permissions
 
@@ -187,8 +195,8 @@ undoes it). Until then:
   `["fonts.googleapis.com", "fonts.gstatic.com"]`.
 - **`hears`**: it doesn't hear what it lists. `"chat"`: its page gets
   every chat message ([Chat messages](#chat-messages)), and its server
-  code's `on-chat` too; `"events"`: its server code's `on-event` gets
-  every event (server code only).
+  code's `on-chat` (or its program) too; `"events"`: its server code's
+  `on-event` (or its program) gets every event.
 
 ### Voices
 
@@ -238,7 +246,8 @@ placeholder "Any scene"). Its other settings, of any kind (`many` too,
 on a text), are for your server code: `nodes-changed` tells it every
 copy of its event nodes on the cards with their settings, and
 `host.emit-to` fires one copy (a detector that fires one card at three
-viewers and another at ten).
+viewers and another at ten). A program gets `nodes` and fires one copy
+with `emit` and `to` ([Programs](#programs)).
 
 **Effect nodes:** at least one input of type `event` (the trigger; `input`
 in a run says which one fired). Their outputs, if any, are `event`s your
@@ -255,34 +264,38 @@ it's skipped. You don't declare or handle them; your page just says
 node that can wait in the queue can't have outputs of its own named
 `started` or `ended`.
 
-**Flow nodes** (server code only): at least one input and one output of
-type `event`. An event coming into one waits while your server code's
-`route` says where it goes: on from one of its event outputs (`go`), with
-what its other outputs (number, text, emotes) carry for that event;
-nowhere (`stop`); or `later`, answered with `host.route-later` within an
-hour (after a web request, say). The card doesn't wait: other events go
-through it meanwhile, and one that waits may be overtaken by later ones,
-as after a Delay. A wire from a flow node's value output gives nothing
-for an event that didn't go through it (the input's own field is used).
-A flow node always gets the viewer, so it needs no `viewer`; `queue`,
-`changes` and `"speak"` are for effect nodes. While its plugin is off or
-its server code isn't running, nothing gets through; events still waiting
-for an answer when your server code stops (switched off, updated,
-crashed) go nowhere. A number your code gives an output is finite: NaN
-or infinity gives nothing.
+**Flow nodes** (server code or a program): at least one input and one
+output of type `event`. An event coming into one waits while your server
+code's `route` says where it goes: on from one of its event outputs
+(`go`), with what its other outputs (number, text, emotes) carry for that
+event; nowhere (`stop`); or `later`, answered with `host.route-later`
+within an hour (after a web request, say). A program answers `route`
+with `routed`, within an hour ([Programs](#programs)). The card doesn't
+wait: other events go through it meanwhile, and one that waits may be
+overtaken by later ones, as after a Delay. A wire from a flow node's
+value output gives nothing for an event that didn't go through it (the
+input's own field is used). A flow node always gets the viewer, so it
+needs no `viewer`; `queue`, `changes` and `"speak"` are for effect nodes.
+While its plugin is off, its server code isn't running or its program
+isn't connected, nothing gets through; events still waiting for an
+answer when your server code stops (switched off, updated, crashed) or
+your program goes go nowhere. A number your code gives an output is
+finite: NaN or infinity gives nothing.
 
-**Value nodes** (server code only): no inputs or outputs of type
+**Value nodes** (server code or a program): no inputs or outputs of type
 `event`, at least one output. When an event needs one of its outputs
 (an input wired from it, or from a Math or Text node fed by it), your
 server code's `compute` gets the node's inputs and settings and answers
 its outputs' values, by name: `now(values)`, or `later` and then
 `host.compute-later` within 10 seconds (after that the node gives
-nothing, and the inputs wired from it use their own fields). It's asked
-once per event; value nodes wired into each other are asked in turn,
-the one furthest back first. The event waits for the answer, the card
-doesn't: other events go through meanwhile. While its plugin is off or
-its server code isn't running, it gives nothing, as it does at once for
-the events still waiting when your server code stops.
+nothing, and the inputs wired from it use their own fields). A program
+answers `compute` with `computed`, within the same 10 seconds. It's
+asked once per event; value nodes wired into each other are asked in
+turn, the one furthest back first. The event waits for the answer, the
+card doesn't: other events go through meanwhile. While its plugin is
+off, its server code isn't running or its program isn't connected, it
+gives nothing, as it does at once for the events still waiting when your
+server code stops or your program goes.
 
 **Inputs with a field:** a setting with the same key and type as a
 `number`, `text` or `emotes` input is that input's field while nothing is
@@ -300,7 +313,7 @@ The same format for a node's `settings` and the plugin's own `settings`.
 | `type` | One of the types below. |
 | `default` | Its value until the user changes it (each type has one if left out). |
 | `required` | `true` on a picture, media or sound setting: a node with none picked has a problem ("Pick a sound."), so its card doesn't run. |
-| `when` | Node settings: `{ "wired": "emotes" }` or `{ "unwired": "emotes" }`: shown (and sent) only while that input is or isn't wired. Shown right under it. Not with `required`. The plugin's own settings: `{ "set": "picture" }`: shown on the Plugins box only while that other setting is set (a picture, sound or text picked or typed, a tick box ticked); it's still sent. |
+| `when` | Node settings: `{ "wired": "emotes" }` or `{ "unwired": "emotes" }`: shown (and sent) only while that input is or isn't wired. Shown right under it. `{ "is": { "shape": "picture" } }`: shown (and sent) only while another of the node's `choice` settings has that value (several: all of them); it keeps its value while hidden. Not with `required`. The plugin's own settings: `{ "set": "picture" }`: shown on the Plugins box only while that other setting is set (a picture, sound or text picked or typed, a tick box ticked); it's still sent. |
 | `group` | The plugin's own settings: a section on the Plugins box ("Look", "Physics") under its name, after the ones without. |
 | `short` | The plugin's own settings: a shorter label for the Plugins box, where the group's heading says the rest (`"Size"` under Text, `label` being `"Text size"`, which nodes show). |
 | `caption` | The plugin's own `bool`s and `number`s: words after the tick box or the field (`"As pictures"`, the label being `"Emotes"`; `"messages at most"`). A number without a slider has a short field. |
@@ -315,9 +328,9 @@ The same format for a node's `settings` and the plugin's own `settings`.
 | `colour` | `"#rrggbb"` | | both |
 | `choice` | the picked option's `value` | `options`: `[{ "value": "top", "label": "The top" }]`; the default is the first unless named. On the Plugins box, up to four options whose labels add up to 32 characters at most are a row of buttons | both |
 | `position` | one of the nine names `top_left`, `top`, `top_right`, `left`, `center`, `right`, `bottom_left`, `bottom`, `bottom_right` (default `top`), or anywhere between as `{ "x": 12, "y": 85 }`: see [Placing a position](#placing-a-position) | `random`: `true` adds "Anywhere (random)", sent as `"random"` | both |
-| `picture` | its path on the app (`"/pictures/hype.gif"`), an `http(s)` address as it is, or `null`. The user can pick a folder of pictures instead: you get one of them, picked at random each time it's sent | | both |
-| `media` | as a picture; a picture or a `.webm` / `.mp4` video | | both |
-| `sound` | its path on the app (`"/sounds/ding.mp3"`), or `null`; or one from a folder, as for a picture | | both |
+| `picture` | its path on the app (`"/pictures/hype.gif"`), an `http(s)` address as it is, or `null`. The user can pick a folder of pictures instead: you get one of them, picked at random each time it's sent | `many`: `true` sends a list of paths instead: a picture is a list of one, a folder all its pictures (in name order), none `[]` | both |
+| `media` | as a picture; a picture or a `.webm` / `.mp4` video | `many`, as a picture's | both |
+| `sound` | its path on the app (`"/sounds/ding.mp3"`), or `null`; or one from a folder, as for a picture | `many`, as a picture's | both |
 | `emotes` | stands in for the emotes input with the same key: stored as `"random"` (random emotes from the channel) or a list of codes (`["Kappa", "PogU"]`); sent as emotes | `count`: a number input or setting of the node: that many are picked at random; without it one random emote, or every listed code once | nodes |
 | `preset` | the picked preset's id (empty: the first) | | nodes, one each, with `presets` |
 | `file` | the picked look's text | `starts`: your looks, page files with names, `[{ "value": "looks/plain.css", "label": "Plain" }]`; `default`: the one picked while none is (`"looks/plain.css"`); `file`: a name whose extension the user's copies get (`"chat.css"`) | the plugin's own |
@@ -390,6 +403,10 @@ each Play, and draws samples of its own.
   ([`keep`](#messages-a-page-sends)).
 - **Keep the background transparent**, and don't set `color-scheme`: a
   different one makes Chromium paint the iframe opaque.
+- **Size a canvas from the page on every frame** (`innerWidth`,
+  `innerHeight`), not only once and on `resize`: the page's size can
+  arrive after your script has run, with no `resize` event, and a canvas
+  sized at the start then stays 0 × 0. The examples' `fit()` does this.
 - It may load from the app only (relative paths are fine), plus `data:`,
   `blob:` and the allowed `page_hosts`. It can't call out to the internet:
   that's server code's job. It can't open the app's WebSockets either:
@@ -578,12 +595,62 @@ sent its settings, so keep early messages with a small inline script in
 `crates/rain/src/lib.rs`). Write your own serde types for the messages
 above; the app's are in `protocol::plugin`, which isn't published.
 
+## A tab in the panel
+
+`"tab": { "label": "Requests", "page": "tab.html", "count": true }` gives
+the plugin a tab in the panel's row, after Activity (plugins' tabs by
+the plugins' names), while the plugin is switched on.
+
+- `label`: the tab's name, 1 to 16 characters (the panel is often an OBS
+  dock 380 px wide).
+- `page`: one of its page files (a path under `overlay/`), served at
+  `/plugins/<id>/tab.html`. It needs no `overlay/index.html`.
+- `count` (optional): its server code puts a number on the tab
+  (`host.set-tab-count`: "Requests (2)"), and the row keeps room for one.
+- A row that's full puts the tabs at its end under ⋯ (More), the app's
+  Plugins, Test and Status first, so in the dock a plugin's tab usually
+  stays in the row; one with a number under ⋯ puts a dot on ⋯.
+
+The page fills the panel under its header (at most 760 px wide) and
+scrolls itself. It's hosted as an overlay page is: a sandboxed iframe
+(scripts run; it can't reach the panel or other pages) with the same
+policy (it loads only from the app, and the `page_hosts` the user
+allowed). It's loaded when its tab is opened and gone when another page
+is, so it asks its server code for what to show when it loads. While
+its server code isn't running (stopped, or its hosts not allowed yet),
+the panel says so above the page.
+
+**The panel's look:** link the app's stylesheet,
+`<link rel="stylesheet" href="/plugin-tab.css">`: the panel's colours as
+CSS variables (`--ground`, `--panel`, `--text`, `--muted`, `--accent`,
+`--ok`, `--warn`, `--error`, …), its page and type, plain buttons
+(`class="primary"`, `"ghost"`, `"danger"`, `"small"`), fields, and
+`.box`, `.row` and `.muted`. The font is the system's. Keep a `<select>`
+out of it: the browser opens its list as a window of its own, which an
+OBS dock on a screen with a different scaling draws in the wrong place;
+use buttons or a list. A `<form>` doesn't submit in the sandbox: take
+Enter in a field, and a button's click, yourself.
+
+**Messages**, with `postMessage`, as an overlay page's (take them only
+from `window.parent`):
+
+| | Message |
+|---|---|
+| It gets | `{ "type": "settings", "values": … }` when it loads and when they change: the plugin-wide settings, as the overlay page gets them. |
+| It gets | `{ "type": "message", "data": … }`: what its server code sent (`host.send-to-tab`), to the tab in every open panel. |
+| It sends | `window.parent.postMessage({ type: "send", data }, "*")`: any JSON (at most 256 KB) for its server code, which gets it as `on-tab(json)`. Dropped while the code isn't running. |
+
+With two panels open (a browser and an OBS dock), each tab's `send`
+reaches the code, and its answers reach both tabs. The Counter example's
+tab (`examples/plugins/counter/overlay/tab.html`) lists its counts with
+− and +.
+
 ## Server code
 
 `server.wasm`: a WebAssembly component (WASI 0.2) for the `plugin` world in
 [`plugin.wit`](../crates/protocol/wit/plugin.wit), which is the reference:
 copy it next to your code. Its package line is the interface's version
-(`lsk:plugin@0.5.0`); a `server.wasm` built for another version doesn't
+(`lsk:plugin@0.6.0`); a `server.wasm` built for another version doesn't
 load (its Plugins box says it doesn't fit), so rebuild it against the
 current file. New host functions don't change the version; new or
 changed exports do.
@@ -603,6 +670,7 @@ does the waiting, so no async is needed in any language.
 | `on-chat(heard)` | With `"hears": ["chat"]`, allowed: a chat message (`line`: its id, platform, time, `viewer`, `text`, `marks`), or a moderator taking some off (`removed(id)`, `viewer-removed`, `cleared(platform)`). |
 | `on-event(heard)` | With `"hears": ["events"]`, allowed: every event (`kind` the built-in event node's id, `bits`, `sub`, `gift_bomb`, `raid`, `reward`, `follow`, `hype_train`, `custom`; its `summary`; the `viewer`; `values` what that node's outputs carry; `origin` `live`, `test` or `replay`). Not chat messages (`on-chat`), nor plugins' events. |
 | `nodes-changed(nodes)` | Right after `start`, and whenever the cards change its event nodes (one added or removed, its settings, its card switched on or off): every copy, each with its `id` (for `emit-to`), node, card, whether the card is on, and its settings that aren't filters. |
+| `on-tab(json)` | Its tab in the panel sent something (its page's `send`), as JSON. Answer with `host.send-to-tab`. A plugin without a tab is never called. |
 | `route(node, input, values, viewer, run, origin)` → `routed` | An event came into one of its flow nodes on `input`. `values` as `run`'s; `viewer` who set it off (`none` for an event without one); `origin` `live`, `test` or `replay`. Answer `go({ output, values })` (one of its event outputs, and its value outputs' values by name), `stop`, or `later` and then `host.route-later(run, …)`. |
 | `on-timer(id)` | A timer it set went off. |
 | `on-response(id, response)` | A web request it started has an answer, or failed. |
@@ -623,6 +691,8 @@ path); `empty` (no picture or sound picked).
 | `emit-to(placed, output, values)` | Fires one placed copy of an event node (`placed-node.id` from `nodes-changed`), from `output` (`event`, or another of its event outputs): only that card runs. An id or output it hasn't is ignored (the log says so). |
 | `emit-output(node, output, values)` | The same, from another of the node's outputs of type `event` ("ended"): the cards wired from that output run. An output the node hasn't is ignored (the log says so). |
 | `send-to-page(json)` | Its overlay page gets `{ "type": "message", "data": … }`. Must be JSON. |
+| `send-to-tab(json)` | Its tab, in every open panel, gets `{ "type": "message", "data": … }`; a panel not showing it drops it. Must be JSON. |
+| `set-tab-count(count)` | The number on its tab ("Requests (2)"), for a `tab` with `"count": true`; 0 shows none. Cleared when it stops or starts again. |
 | `set-timer(ms, repeat)` → id, `cancel-timer(id)` | `on-timer` after `ms` (at least 10), and every `ms` if `repeat`. |
 | `fetch(request)` → id | A web request (http or https, to a host in `hosts`, not the app itself); the answer comes to `on-response`. Up to 5 redirects to hosts in `hosts` are followed; one elsewhere is the answer. |
 | `connect(url)` → id, `send(id, text)`, `send-binary(id, data)`, `close(id)` | A WebSocket (ws or wss, to a host in `hosts`, any port but the app's own on this PC), text and binary messages of at most 4 MB (a bigger one isn't sent; one coming in closes the socket). If it can't be opened, `on-socket` gets `closed` with why. |
@@ -746,6 +816,15 @@ Control API; the WebSocket is at `/control/ws` on the same address.
 ← { "type": "run", "node": "shout", "input": "trigger", "values": { … } }
 ← { "type": "speak", "request": 7, "voice": "beeps", "text": "Thanks, Ann!", "speed": 1.0 }
 → { "type": "spoken", "request": 7, "audio": "<base64>", "format": "wav" }
+← { "type": "route", "run": 12, "node": "regulars", "input": "event", "values": { "at_least": 10 }, "viewer": { … }, "origin": "live" }
+→ { "type": "routed", "run": 12, "output": "regular", "values": { "count": 14 } }
+← { "type": "compute", "run": 13, "node": "messages", "values": { "viewer": { "text": "Ann", "parts": [ … ] } }, "origin": "live" }
+→ { "type": "computed", "run": 13, "values": { "count": 14 } }
+← { "type": "nodes", "nodes": [ { "id": "wow/3", "node": "said", "card": "WoW", "on": true, "settings": { "word": { "text": "gg", "parts": [ … ] }, "times": 3 } } ] }
+→ { "type": "emit", "to": "wow/3", "values": { "viewer": "Ann" } }
+← { "type": "emitted", "node": "said" }
+← { "type": "chat", "line": { … } }
+← { "type": "heard_event", "kind": "bits", "summary": "Ann cheered 100 bits", "viewer": { … }, "values": { … }, "origin": "live" }
 ```
 
 - `register` takes a manifest as `plugin.json` would be, once per
@@ -766,12 +845,47 @@ Control API; the WebSocket is at `/control/ws` on the same address.
 - `run` is the message a page gets, with the same [values](#values).
 - `speak` is answered within 30 seconds with `spoken`: `audio` (base64)
   and `format` (`wav`, `mp3`, `ogg`), or `error` with why.
+- `route` comes when an event reaches one of its [flow nodes](#nodes), as
+  server code's `route`: `values` as a run's, `viewer` who set it off (left
+  out for an event without one), `origin` `live`, `test` or `replay`.
+  Answer `routed` with the same `run`: `output` (one of the node's event
+  outputs) and `values` by its value outputs' names, or no `output` to
+  send the event nowhere. The event waits for it, up to an hour.
+- `compute` comes when one of its [value nodes](#nodes) is needed for an
+  event, `values` its inputs and settings. Answer `computed` with the same
+  `run` and its outputs' values by name (one left out gives nothing),
+  within 10 seconds; after that the node gives nothing.
+- What `routed` and `computed` give is as a run's [values](#values): a
+  number, `true` or `false`, a plain string, a text (`{ "text", "parts" }`,
+  its emotes kept), or emotes. Each is converted to its output's type
+  where it can be (a text that reads as a number). A good answer gets no
+  reply; one for a run that doesn't wait (answered already, or too late)
+  is refused (an `error`, status 404), as is an output the node hasn't
+  (the event then goes nowhere).
+- `nodes` comes right after `registered` (for a plugin with event nodes)
+  and whenever the cards change them (a copy added or removed, its
+  settings, its card switched on or off): every copy, each with its `id`,
+  node, card, whether the card is on, and its settings that aren't
+  filters, as a run's values (a `many` list as a text with a line each).
+  `emit` with `to` and one of those ids fires only that copy (`node` may
+  then be left out); an id it hasn't is refused (404).
+- With `"hears"` allowed on the Plugins page: the chat as `chat`,
+  `chat_removed`, `chat_user_removed` and `chat_cleared`, the messages a
+  page gets ([Chat messages](#chat-messages)); every event as
+  `heard_event`, as server code's `on-event` (`kind`, `summary`,
+  `viewer`, `values` as a run's, `origin`). They come one at a time: when
+  the program doesn't keep up, 500 wait at most, then the oldest are
+  dropped.
+- When the program goes, events waiting at its flow nodes go nowhere and
+  its value nodes give nothing, at once.
 - A program has no overlay page and no queued nodes: its effects are
   whatever the program does.
 - Its node types are remembered, so cards keep its nodes while it isn't
   running. Its event nodes then don't fire, and its effects go nowhere.
 - The connection gets the control API's state messages too, and can send
   any other control API request ([control-api.md](control-api.md)).
+  Every plugin's switch, a program's too, is in its `plugins`, by the
+  plugin's id: a Stream Deck key can switch it.
 
 ## Examples to start from
 
@@ -780,14 +894,15 @@ Control API; the WebSocket is at `/control/ws` on the same address.
 | [`examples/plugins/confetti`](../examples/plugins/confetti) | The smallest page: a manifest, a canvas, `run`. |
 | [`examples/plugins/bits-to-money`](../examples/plugins/bits-to-money) | Rust server code with only a value node (`compute`): a cheer's bits at a rate, as a number and as text. |
 | [`examples/plugins/copypasta`](../examples/plugins/copypasta) | Rust server code that hears the chat (`on-chat`) and fires one placed event node at a time (`nodes-changed`, `emit-to`), each with its own settings. |
-| [`examples/plugins/counter`](../examples/plugins/counter) | Rust server code: an effect node, an event node and a flow node (Every other: `route`), `emit`, stored values, `send-to-page`. |
+| [`examples/plugins/counter`](../examples/plugins/counter) | Rust server code: an effect node, an event node, a value node (Current count: `compute`) and a flow node (Every other: `route`), `emit`, stored values, `send-to-page`, and a tab in the panel (`on-tab`, `send-to-tab`) to set the counts right. |
 | [`examples/programs/fake-platform.mjs`](../examples/programs/fake-platform.mjs) | A program (Node, nothing to install): an event node, an effect node, a voice. |
-| [`crates/e2e/plugins/host-check`](../crates/e2e/plugins/host-check) | Rust server code using every `host` call: timers, web requests, WebSockets, settings (and `settings-changed`), a secret, choices, a voice, an effect node's own output (Relay), a queued node (Hold: `done`, `skip`), a flow node answering later (Later: `route-later`). |
+| [`examples/programs/chat-regulars.mjs`](../examples/programs/chat-regulars.mjs) | A program (Node) that hears the chat and events: a value node (`compute`), a flow node (`route`), and an event node fired one copy at a time (`nodes`, `emit` with `to`), each with its own settings. |
+| [`crates/e2e/plugins/host-check`](../crates/e2e/plugins/host-check) | Rust server code using every `host` call: timers, web requests, WebSockets, settings (and `settings-changed`), a secret, choices, a voice, an effect node's own output (Relay), a queued node (Hold: `done`, `skip`), a flow node answering later (Later: `route-later`), a tab with a number on it (`set-tab-count`). |
 | [`crates/obs`](../crates/obs) with [its manifest](../crates/server/plugins/obs/plugin.json) | A whole plugin in Rust server code: a WebSocket kept open, a secret setting, choices filled in and following each other (`sources/{scene}`), a status, a note under a setting, `settings-changed` (connects again on a new address), own outputs, queued runs with `skip`, event nodes with a filter (`many`). |
 | [`crates/server/plugins/sound`](../crates/server/plugins/sound) | The queue (`done`, `skip`, a run sent twice), the master volume, a required sound. Plain JavaScript. |
 | [`crates/server/plugins/media`](../crates/server/plugins/media) | A media setting: pictures, and videos with their sound; an optional queue. |
 | [`crates/server/plugins/speak`](../crates/server/plugins/speak) | A text input read aloud (`"speak": true`), playing `speech`. |
-| [`crates/server/plugins/particles`](../crates/server/plugins/particles) | An emotes input, a preview. |
+| [`crates/server/plugins/particles`](../crates/server/plugins/particles) | An emotes input, a preview, settings shown by another's value (`is`), a picture folder as a list (`many`). |
 | [`crates/alert`](../crates/alert) with [its manifest](../crates/server/plugins/alert/plugin.json) | A page in Rust: presets, `changes`, text styles, `page_hosts`, speech in the queue. |
 | [`crates/chat`](../crates/chat) with [its manifest](../crates/server/plugins/chat/plugin.json) | A page in Rust: `hears`, `keep`, a `file` setting, `help`, `own_source`, a preview with samples, `viewer`. |
 | [`crates/rain`](../crates/rain) with [its manifest](../crates/server/plugins/rain/plugin.json) | A page in Rust: an emotes setting with a count, `when`, sliders in groups, animated emotes. |
@@ -795,10 +910,7 @@ Control API; the WebSocket is at `/control/ws` on the same address.
 ## Not possible yet
 
 - A list (`many`) anywhere but an event node's text settings.
-- Flow and value nodes, hearing events, and settings for an event node's
-  own code from a program (only server code has them).
 - Effect nodes' own outputs fired by a page or a program (only server
   code fires them).
 - Server code's effect runs don't bring `changes`, preset `settings` or
   the `viewer`.
-- Plugin effects in the control API's `effects` (switches for Stream Deck).

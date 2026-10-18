@@ -1130,20 +1130,15 @@ async fn the_alerts_box_lines_up_and_previews_what_is_edited() {
         .await;
     app.wait_for_config("red text", |config| first(config, "text_color") == Some("#ff0000".into())).await;
     panel.run("document.getElementById('plugin-alert-preview').scrollIntoView({ block: 'center' })").await;
-    tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
     let path = app.dir.join("preview.png");
-    let png = panel.screenshot(&path).await;
-    let red: u32 = panel
-        .eval(&format!(
-            "(async () => {{ const box = document.getElementById('plugin-alert-preview').parentElement \
-             .getBoundingClientRect(); const ratio = devicePixelRatio; const image = new Image(); \
-             image.src = 'data:image/png;base64,{png}'; await image.decode(); \
-             const canvas = document.createElement('canvas'); canvas.width = image.width; canvas.height = image.height; \
-             const context = canvas.getContext('2d'); context.drawImage(image, 0, 0); \
-             const d = context.getImageData(box.left * ratio, box.top * ratio, box.width * ratio, box.height * ratio).data; \
-             let red = 0; for (let i = 0; i < d.length; i += 4) if (d[i] > 180 && d[i + 1] < 90 && d[i + 2] < 90) red++; \
-             return red; }})()"
-        ))
+    let red = panel
+        .wait_pixels(
+            e2e::TIMEOUT,
+            &path,
+            Some("document.getElementById('plugin-alert-preview').parentElement"),
+            "r > 180 && g < 90 && b < 90",
+            |red| red > 100,
+        )
         .await;
     assert!(red > 100, "only {red} red pixels in the preview; see {}", path.display());
 
@@ -1291,7 +1286,12 @@ async fn confetti_waits_for_its_alert() {
                 PluginMessage::Run { queue_id: Some(_), .. } => Some(()),
                 _ => None,
             },
-            Command::Plugin(command) if command.plugin == "particles" => panic!("the confetti came first"),
+            // Its settings may come (the config was saved); its run mustn't.
+            Command::Plugin(command)
+                if command.plugin == "particles" && matches!(command.message, PluginMessage::Run { .. }) =>
+            {
+                panic!("the confetti came first")
+            }
             _ => None,
         })
         .await;
@@ -1363,6 +1363,82 @@ async fn an_alert_picture_from_a_folder() {
     assert!(from_folder.contains(&picture), "{picture}");
     let served: u16 = panel.eval(&format!("fetch('{picture}').then(r => r.status)")).await;
     assert_eq!(served, 200);
+    panel.close().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs a browser and built panel; run with `cargo e2e`"]
+async fn particles_pictures_from_a_folder() {
+    // A Particles node with a folder picked while its pieces are confetti.
+    let mut config = test_config();
+    config.cards.push(Card {
+        id: "party".into(),
+        name: "Party".into(),
+        enabled: true,
+        nodes: vec![
+            Node { id: 1, x: 40.0, y: 60.0, kind: NodeKind::Custom { name: String::new() } },
+            plugin_node(2, "particles", "burst", serde_json::json!({ "picture": "party/" })),
+        ],
+        wires: vec![wire((1, "event"), (2, "trigger"))],
+    });
+    let app = App::start("particles_pictures_from_a_folder", config).await;
+    let folder = app.dir.join("pictures").join("party");
+    std::fs::create_dir_all(&folder).unwrap();
+    for name in ["a.png", "b.png", "clip.webm"] {
+        std::fs::write(folder.join(name), b"\x89PNG\r\n\x1a\nnot really a picture").unwrap();
+    }
+    let mut overlay = app.overlay(vec![]).await;
+    let panel = open_card(&app, "party", 2).await;
+    let settings = |config: &AppConfig| match &card(config, "party").node(2).unwrap().kind {
+        NodeKind::Plugin { settings, .. } => settings.clone(),
+        _ => Default::default(),
+    };
+    let set = |id: &str, value: &str| {
+        format!(
+            "const s = document.getElementById('{id}'); s.value = '{value}'; \
+             s.dispatchEvent(new Event('change', {{ bubbles: true }}))"
+        )
+    };
+    async fn run(overlay: &mut e2e::Overlay) -> serde_json::Map<String, serde_json::Value> {
+        overlay
+            .wait_for("the particles", |command| match command {
+                Command::Plugin(command) if command.plugin == "particles" => match &command.message {
+                    PluginMessage::Run { values, .. } => Some(values.clone()),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .await
+    }
+
+    // Confetti: no Picture, nor its flips.
+    let picture_rows = "['picture', 'flip_x', 'flip_y'] \
+                        .filter(key => document.getElementById('node-2-plugin-' + key)).length";
+    panel.wait("Pieces", "document.getElementById('node-2-plugin-shape')").await;
+    assert_eq!(panel.eval::<usize>(picture_rows).await, 0);
+
+    // A picture: they show, the folder still picked.
+    panel.run(&set("node-2-plugin-shape", "picture")).await;
+    app.wait_for_config("a picture", |config| settings(config).get("shape") == Some(&"picture".into())).await;
+    panel.wait("Picture and its flips", &format!("{picture_rows} === 3")).await;
+    panel.click("#node-2-plugin-flip_x").await;
+    app.wait_for_config("some mirrored", |config| settings(config).get("flip_x") == Some(&true.into())).await;
+
+    // A run: every picture in the folder (not the video).
+    panel.click("#card-test").await;
+    let values = run(&mut overlay).await;
+    let pictures = ["party/a.png", "party/b.png"].map(protocol::alert::picture_path);
+    assert_eq!(values["picture"], serde_json::json!(pictures));
+    assert_eq!(values["flip_x"], true);
+
+    // Back to confetti: hidden again and not sent, the folder kept.
+    panel.run(&set("node-2-plugin-shape", "confetti")).await;
+    app.wait_for_config("confetti", |config| settings(config).get("shape") == Some(&"confetti".into())).await;
+    panel.wait("hidden again", &format!("{picture_rows} === 0")).await;
+    assert_eq!(settings(&app.saved_config()).get("picture"), Some(&"party/".into()));
+    panel.click("#card-test").await;
+    let values = run(&mut overlay).await;
+    assert_eq!((values.get("picture"), values.get("flip_x")), (None, None), "{values:?}");
     panel.close().await;
 }
 
@@ -2413,18 +2489,24 @@ async fn hype_trains_are_tested_and_the_bar_follows_them() {
         ]
     );
     // The alert card: its start, its level-up and its end, not the
-    // contribution in between.
+    // contribution in between. So the level-up comes two of the train's
+    // 2 s steps after the start, close to a wait's usual 5 s.
     panel.go("card/hype-train-alert").await;
     panel.wait("the alert card", "document.querySelectorAll('.node').length === 2").await;
     panel.click("#card-test").await;
     for text in ["A hype train started", "The hype train reached level 2", "The hype train ended at level 2"]
     {
-        assert_eq!(overlay.next_alert().await, text);
+        let (_, shown) = overlay
+            .wait_at_most(std::time::Duration::from_secs(10), e2e::alert_shown)
+            .await
+            .unwrap_or_else(|| panic!("timed out waiting for the alert {text:?}"));
+        assert_eq!(shown, text);
     }
 
     // With the bar card on, the Test page's train at level 3 reaches it,
     // with the train's numbers; then its end, with no time left.
     panel.go("cards").await;
+    panel.wait("the cards", "document.getElementById('card-switch-hype-train-bar')").await;
     panel.click("#card-switch-hype-train-bar").await;
     app.wait_for_config("the bar card on", |config| card(config, "hype-train-bar").enabled).await;
     panel.go("test").await;
@@ -2512,7 +2594,7 @@ async fn hype_trains_are_tested_and_the_bar_follows_them() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "needs a browser and built panel; run with `cargo e2e`"]
-async fn the_control_api_switches_cards_and_effects_and_fires_events() {
+async fn the_control_api_switches_cards_and_plugins_and_fires_events() {
     // A card for `/control/events/party`: "{colour} party!".
     let mut config = test_config();
     let node = |id, kind| protocol::cards::Node { id, x: 40.0 + 300.0 * f64::from(id - 1), y: 60.0, kind };
@@ -2526,7 +2608,7 @@ async fn the_control_api_switches_cards_and_effects_and_fires_events() {
         ],
         wires: vec![wire((1, "event"), (2, "trigger"))],
     });
-    let app = App::start("the_control_api_switches_cards_and_effects_and_fires_events", config).await;
+    let app = App::start("the_control_api_switches_cards_and_plugins_and_fires_events", config).await;
     let mut overlay = app.overlay_holding(vec![]).await;
     let key = app.control_key();
     let panel = Panel::open(&app, "control").await;
@@ -2542,10 +2624,16 @@ async fn the_control_api_switches_cards_and_effects_and_fires_events() {
     // The state, as the Stream Deck plugin sees it on connecting.
     let mut client = app.control().await;
     let state = client.wait_for_state("the first state", |_| true).await;
-    assert_eq!(state.version, 1);
+    assert_eq!(state.version, 2);
     assert!(state.cards.iter().any(|card| card.id == "party" && card.on));
     assert_eq!(state.events, ["party"]);
-    assert_eq!(state.effects.len(), 4);
+    // Every plugin's switch, and the text styles', by name.
+    let ids: Vec<&str> = state.plugins.iter().map(|plugin| plugin.id.as_str()).collect();
+    for id in ["alert", "hype-train", "media", "particles", "rain", "sound", "speak", "text_styles"] {
+        assert!(ids.contains(&id), "{id} in {ids:?}");
+    }
+    let names: Vec<String> = state.plugins.iter().map(|plugin| plugin.name.to_lowercase()).collect();
+    assert!(names.is_sorted(), "{names:?}");
     let (status, answer) = panel.request("GET", &with_key("/control/")).await;
     assert_eq!(status, 200);
     assert_eq!(answer["cards"].as_array().map(Vec::len), Some(state.cards.len()));
@@ -2561,18 +2649,55 @@ async fn the_control_api_switches_cards_and_effects_and_fires_events() {
     let (status, _) = panel.request("GET", &with_key("/control/cards/nope/on")).await;
     assert_eq!(status, 404);
 
-    // An effect, over the WebSocket.
-    client.send(&ControlRequest::Effect { id: "rain".into(), set: Switch::Off }).await;
-    let effect = client
+    // A plugin, over the WebSocket.
+    client.send(&ControlRequest::Plugin { id: "rain".into(), set: Switch::Off }).await;
+    let plugin = client
         .wait_for("the answer", |message| match message {
-            ControlMessage::Effect { effect } => Some(effect.clone()),
+            ControlMessage::Plugin { plugin } => Some(plugin.clone()),
             _ => None,
         })
         .await;
-    assert_eq!((effect.id.as_str(), effect.on), ("rain", false));
+    assert_eq!((plugin.id.as_str(), plugin.on), ("rain", false));
     app.wait_for_config("the rain off", |config| !config.plugin("rain").enabled).await;
-    let (status, _) = panel.request("POST", &with_key("/control/effects/confetti/on")).await;
-    assert_eq!(status, 404);
+    // Any plugin, not just the four the API had at first; by id only.
+    let (status, answer) = panel.request("POST", &with_key("/control/plugins/particles/toggle")).await;
+    assert_eq!(
+        (status, answer["name"].as_str(), answer["on"].as_bool()),
+        (200, Some("Particles"), Some(false))
+    );
+    app.wait_for_config("particles off", |config| !config.plugin("particles").enabled).await;
+    client
+        .wait_for_state("particles off", |state| state.plugins.iter().any(|e| e.id == "particles" && !e.on))
+        .await;
+    let (status, answer) = panel.request("POST", &with_key("/control/plugins/text_styles/off")).await;
+    assert_eq!(
+        (status, answer["name"].as_str(), answer["on"].as_bool()),
+        (200, Some("Text styles"), Some(false))
+    );
+    app.wait_for_config("the text styles off", |config| !config.text_styles_enabled).await;
+    for gone in ["speech", "Particles", "confetti"] {
+        let (status, answer) = panel.request("POST", &with_key(&format!("/control/plugins/{gone}/on"))).await;
+        assert_eq!(status, 404, "{gone}: {answer}");
+    }
+
+    // A plugin copied into the folder joins the list once it's found.
+    let example = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/plugins/confetti");
+    copy_dir(&example, &app.dir.join("plugins").join("confetti"));
+    panel.run("location.hash = '#/plugins'").await;
+    panel.wait("the plugins page", "document.getElementById('plugins-reload')").await;
+    panel.click("#plugins-reload").await;
+    client
+        .wait_for_state("Confetti listed", |state| {
+            state
+                .plugins
+                .iter()
+                .any(|e| (e.id.as_str(), e.name.as_str(), e.on) == ("confetti", "Confetti", true))
+        })
+        .await;
+    let (status, answer) = panel.request("POST", &with_key("/control/plugins/confetti/off")).await;
+    assert_eq!((status, answer["on"].as_bool()), (200, Some(false)));
+    app.wait_for_config("confetti off", |config| !config.plugin("confetti").enabled).await;
+    panel.run("location.hash = '#/control'").await;
 
     // An event with data runs the card.
     let (status, answer) =
@@ -2665,6 +2790,33 @@ async fn the_control_api_switches_cards_and_effects_and_fires_events() {
     panel.wait("the URL", "document.getElementById('control-url')").await;
     let url: String = panel.eval("document.getElementById('control-url').value").await;
     assert_eq!(url, format!("http://127.0.0.1:{}/control/cards/emote-rain/toggle?key={key}", app.port));
+    // A plugin: every one and the text styles, by name; the first until
+    // one is picked.
+    let pick = |id: &str, value: &str| {
+        format!(
+            "const s = document.getElementById('{id}'); s.value = '{value}'; \
+             s.dispatchEvent(new Event('change', {{ bubbles: true }}))"
+        )
+    };
+    panel.run(&pick("control-what", "plugin")).await;
+    panel.wait("the plugins", "document.querySelector('#control-target option[value=confetti]')").await;
+    let label: String = panel.eval("document.querySelector('label[for=control-target]').textContent").await;
+    assert_eq!(label, "Plugin");
+    let options: Vec<String> =
+        panel.eval("[...document.querySelectorAll('#control-target option')].map(o => o.textContent)").await;
+    assert_eq!(options.first().map(String::as_str), Some("Alerts"), "{options:?}");
+    for name in ["Confetti", "Text styles"] {
+        assert!(options.iter().any(|option| option == name), "{name} in {options:?}");
+    }
+    let url: String = panel.eval("document.getElementById('control-url').value").await;
+    assert!(url.ends_with(&format!("/control/plugins/alert/toggle?key={key}")), "{url}");
+    panel.run(&pick("control-target", "confetti")).await;
+    panel
+        .wait(
+            "Confetti's URL",
+            "document.getElementById('control-url').value.includes('/control/plugins/confetti/toggle')",
+        )
+        .await;
 
     // A new key: the old one stops working.
     panel.run("window.confirm = () => true").await;
@@ -2679,6 +2831,7 @@ async fn the_control_api_switches_cards_and_effects_and_fires_events() {
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "needs a browser and built panel; run with `cargo e2e`"]
 async fn the_stream_deck_plugin_installs_from_status_and_says_its_version() {
+    use protocol::control::CONTROL_VERSION;
     use protocol::panel::{PanelEvent, Status};
     use protocol::streamdeck::{CLIENT, PLUGIN_FILE, release_file_url, shown};
     let app =
@@ -2713,7 +2866,12 @@ async fn the_stream_deck_plugin_installs_from_status_and_says_its_version() {
     // The plugin says its version when it connects, and Status shows it
     // while it's connected.
     let mut deck = app.control().await;
-    deck.send(&ControlRequest::Hello { client: CLIENT.into(), version: built_in.clone() }).await;
+    deck.send(&ControlRequest::Hello {
+        client: CLIENT.into(),
+        version: built_in.clone(),
+        api: CONTROL_VERSION,
+    })
+    .await;
     let answer = deck
         .wait_for("the answer", |message| match message {
             ControlMessage::Hello { version } => Some(version.clone()),
@@ -2725,7 +2883,7 @@ async fn the_stream_deck_plugin_installs_from_status_and_says_its_version() {
     assert_eq!(panel.eval::<String>(button).await, "Install");
     assert_eq!(panel.eval::<String>(head).await, format!("Stream Deck {version}"));
     // A hello needs a name.
-    deck.send(&ControlRequest::Hello { client: " ".into(), version: "1".into() }).await;
+    deck.send(&ControlRequest::Hello { client: " ".into(), version: "1".into(), api: CONTROL_VERSION }).await;
     let refused = deck
         .wait_for("the refusal", |message| match message {
             ControlMessage::Error { status, .. } => Some(*status),
@@ -2738,7 +2896,12 @@ async fn the_stream_deck_plugin_installs_from_status_and_says_its_version() {
 
     // An older one: Update installs the built-in one.
     let mut old = app.control().await;
-    old.send(&ControlRequest::Hello { client: CLIENT.into(), version: "0.0.1.0".into() }).await;
+    old.send(&ControlRequest::Hello {
+        client: CLIENT.into(),
+        version: "0.0.1.0".into(),
+        api: CONTROL_VERSION,
+    })
+    .await;
     panel.wait("the old one", &format!("{state} === '0.0.1 connected'")).await;
     panel.wait("Update", &format!("{button} === 'Update to {version}'")).await;
     assert_eq!(panel.eval::<String>(head).await, "Stream Deck 0.0.1");
@@ -2746,6 +2909,32 @@ async fn the_stream_deck_plugin_installs_from_status_and_says_its_version() {
     app.wait_logged("the plugin opened again", 2, opened).await;
     let wide: f64 = panel.eval("document.documentElement.scrollWidth").await;
     assert!(wide <= 380.0, "fits the dock: {wide}");
+    drop(old);
+    panel.wait("gone again", &format!("{state} === 'Not connected'")).await;
+
+    // One too old for the control API (api 1, as a hello without it says)
+    // hangs up on seeing the state; Status still offers Update, until one
+    // that speaks the app's connects.
+    let mut too_old = app.control().await;
+    too_old.send(&ControlRequest::Hello { client: CLIENT.into(), version: "0.2.1.0".into(), api: 1 }).await;
+    too_old
+        .wait_for("the answer", |message| matches!(message, ControlMessage::Hello { .. }).then_some(()))
+        .await;
+    drop(too_old);
+    panel.wait("too old", &format!("{state} === '0.2.1 too old'")).await;
+    panel.wait("Update", &format!("{button} === 'Update to {version}'")).await;
+    assert_eq!(panel.eval::<String>(head).await, "Stream Deck 0.2.1");
+    let mut current = app.control().await;
+    current
+        .send(&ControlRequest::Hello {
+            client: CLIENT.into(),
+            version: built_in.clone(),
+            api: CONTROL_VERSION,
+        })
+        .await;
+    panel.wait("the current one", &format!("{state} === '{version} connected'")).await;
+    drop(current);
+    panel.wait("not too old any more", &format!("{state} === 'Not connected'")).await;
 
     // A build without the plugin says so, and links to the release's file,
     // opened in the browser on the app's PC. (Its status, handed to the
@@ -2774,7 +2963,6 @@ async fn the_stream_deck_plugin_installs_from_status_and_says_its_version() {
         line.contains("not opened (--no-open)") && line.contains(&href)
     })
     .await;
-    drop(old);
     panel.close().await;
 }
 
@@ -3780,21 +3968,9 @@ async fn the_alerts_page_shows_alerts_and_says_when_its_done() {
     let mut control = app.control().await;
     let data = serde_json::json!({ "colour": "green" }).as_object().unwrap().clone();
     control.send(&ControlRequest::Event { name: "party".into(), data }).await;
-    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-
     let path = app.dir.join("alert.png");
-    let png = overlay.screenshot(&path).await;
-    let green: u32 = overlay
-        .eval(&format!(
-            "(async () => {{ const image = new Image(); image.src = 'data:image/png;base64,{png}'; \
-             await image.decode(); const canvas = document.createElement('canvas'); \
-             canvas.width = image.width; canvas.height = image.height; \
-             const context = canvas.getContext('2d'); context.drawImage(image, 0, 0); \
-             const d = context.getImageData(0, 0, canvas.width, canvas.height).data; let green = 0; \
-             for (let i = 0; i < d.length; i += 4) {{ \
-               if (d[i + 1] > 200 && d[i] < 60 && d[i + 2] < 60) green++; }} \
-             return green; }})()"
-        ))
+    let green = overlay
+        .wait_pixels(e2e::TIMEOUT, &path, None, "g > 200 && r < 60 && b < 60", |green| green > 5_000)
         .await;
     assert!(green > 5_000, "only {green} pixels of the alert's box; see {}", path.display());
 
@@ -3873,25 +4049,35 @@ async fn the_rain_plugin_draws_in_its_sandbox() {
     std::fs::create_dir_all(app.dir.join("pictures")).unwrap();
     std::fs::write(app.dir.join("pictures").join("red.gif"), RED_GIF).unwrap();
     let overlay = Panel::open_overlay(&app, "?modules=rain").await;
-    overlay.wait("its layer", "document.querySelector('iframe#plugin-rain[sandbox=allow-scripts]')").await;
+    overlay
+        .wait("its layer", "document.querySelector('iframe#plugin-rain[sandbox=allow-scripts][data-loaded]')")
+        .await;
     overlay.run("document.body.style.background = 'black'").await;
     // A run as the shell passes it on, with a picture standing in for an
-    // emote (the test app knows no emotes).
-    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-    overlay
-        .run(
-            "document.getElementById('plugin-rain').contentWindow.postMessage({ type: 'run', node: 'rain',              input: 'trigger', values: { emotes: [{ code: 'Red', url: '/pictures/red.gif', overlays: [] }],              count: 40 }, issued_at_ms: Date.now() }, '*')",
+    // emote (the test app knows no emotes); `changes` as a node's. Its page
+    // keeps what comes before its WebAssembly has started.
+    let rain = |changes: &str| {
+        format!(
+            "document.getElementById('plugin-rain').contentWindow.postMessage({{ type: 'run', node: 'rain', \
+             input: 'trigger', values: {{ emotes: [{{ code: 'Red', url: '/pictures/red.gif', overlays: [] }}], \
+             count: 40 }}, changes: {changes}, issued_at_ms: Date.now() }}, '*')"
         )
-        .await;
-    tokio::time::sleep(std::time::Duration::from_millis(2500)).await;
-
+    };
     let path = app.dir.join("rain.png");
-    let png = overlay.screenshot(&path).await;
-    let red: u32 = overlay
-        .eval(&format!(
-            "(async () => {{ const image = new Image(); image.src = 'data:image/png;base64,{png}';              await image.decode(); const canvas = document.createElement('canvas');              canvas.width = image.width; canvas.height = image.height;              const context = canvas.getContext('2d'); context.drawImage(image, 0, 0);              const d = context.getImageData(0, 0, canvas.width, canvas.height).data; let red = 0;              for (let i = 0; i < d.length; i += 4) {{ if (d[i] > 100 && d[i + 1] < 60 && d[i + 2] < 60) red++; }}              return red; }})()"
-        ))
-        .await;
+    let is_red = "r > 100 && g < 60 && b < 60";
+
+    // Falling off the bottom: they fall past it and are gone long before
+    // their 8 s lifetime (they're on screen for about a second and a half).
+    overlay.run(&rain("{ fall_through: true }")).await;
+    let falling = overlay.wait_pixels(e2e::TIMEOUT, &path, None, is_red, |red| red > 2_000).await;
+    assert!(falling > 2_000, "only {falling} pixels of falling emotes; see {}", path.display());
+    let left =
+        overlay.wait_pixels(std::time::Duration::from_secs(4), &path, None, is_red, |red| red < 50).await;
+    assert!(left < 50, "{left} pixels of emotes left on the floor; see {}", path.display());
+
+    // Piling up.
+    overlay.run(&rain("{}")).await;
+    let red = overlay.wait_pixels(e2e::TIMEOUT, &path, None, is_red, |red| red > 20_000).await;
     assert!(red > 20_000, "only {red} pixels of fallen emotes; see {}", path.display());
     overlay.close().await;
 }
@@ -4003,7 +4189,7 @@ async fn a_program_connects_as_a_plugin() {
 
     // Its event runs the card, and its effect comes back to it.
     let values = serde_json::json!({ "viewer": "Ann", "months": 3 }).as_object().unwrap().clone();
-    program.send(&ControlRequest::Emit { node: "membership".into(), output: None, values }).await;
+    program.send(&ControlRequest::Emit { node: "membership".into(), output: None, values, to: None }).await;
     let run = |message: &ControlMessage| match message {
         ControlMessage::Run { node, values, .. } if node == "shout" => Some(values.clone()),
         _ => None,
@@ -4016,6 +4202,7 @@ async fn a_program_connects_as_a_plugin() {
         node: "membership".into(),
         output: Some(output.into()),
         values: values.clone(),
+        to: None,
     };
     program.send(&emit("viewer")).await;
     let refused = program
@@ -4728,26 +4915,51 @@ async fn a_plugin_previews_on_its_plugins_box() {
              .getBoundingClientRect(); return Math.abs(box.height / box.width - 9 / 16) < 0.02; })()",
         )
         .await;
-    // ▶ Play: its page draws in the preview (colours on the grey checks).
-    tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
-    panel.click("#plugin-particles-play").await;
-    tokio::time::sleep(std::time::Duration::from_millis(700)).await;
+    // Once its page has loaded, it draws its preview node's run by itself;
+    // ▶ Play draws another once that one is over (colours on the grey
+    // checks).
     let path = app.dir.join("preview.png");
-    let png = panel.screenshot(&path).await;
-    let coloured: u32 = panel
-        .eval(&format!(
-            "(async () => {{ const box = document.getElementById('plugin-particles-preview').parentElement \
-             .getBoundingClientRect(); const ratio = devicePixelRatio; const image = new Image(); \
-             image.src = 'data:image/png;base64,{png}'; await image.decode(); \
-             const canvas = document.createElement('canvas'); canvas.width = image.width; canvas.height = image.height; \
-             const context = canvas.getContext('2d'); context.drawImage(image, 0, 0); \
-             const d = context.getImageData(box.left * ratio, box.top * ratio, box.width * ratio, box.height * ratio).data; \
-             let coloured = 0; for (let i = 0; i < d.length; i += 4) {{ \
-             const [r, g, b] = [d[i], d[i + 1], d[i + 2]]; \
-             if (Math.max(r, g, b) - Math.min(r, g, b) > 60) coloured++; }} return coloured; }})()"
-        ))
+    let preview = Some("document.getElementById('plugin-particles-preview').parentElement");
+    let coloured = "Math.max(r, g, b) - Math.min(r, g, b) > 60";
+    let wait = std::time::Duration::from_secs(10);
+    let drawn = panel.wait_pixels(wait, &path, preview, coloured, |count| count > 200).await;
+    if drawn <= 200 {
+        panic!("the preview's page never drew its run; see {}\n{}", path.display(), panel.state().await);
+    }
+    let left = panel.wait_pixels(wait, &path, preview, coloured, |count| count < 50).await;
+    assert!(left < 50, "the preview's run never ended: {left} coloured pixels; see {}", path.display());
+    // Its canvas follows the page's size without a resize event: in an
+    // iframe the size can arrive after the page's script has run (its
+    // canvas stayed 0 × 0 in a few runs out of a hundred).
+    panel.eval_in_frame::<u32>("/plugins/particles/", "canvas.width = canvas.height = 0").await;
+    panel.click("#plugin-particles-play").await;
+    let played = panel.wait_pixels(e2e::TIMEOUT, &path, preview, coloured, |count| count > 200).await;
+    if played <= 200 {
+        panic!("Play drew only {played} coloured pixels; see {}\n{}", path.display(), panel.state().await);
+    }
+    // Many runs at once (a big gift of subs, Show on overlay pressed over
+    // and over) keep Most pieces on screen going (3000): past that the
+    // oldest fade out quickly, and past twice as many they go at once.
+    let bursts = "for (let i = 0; i < 40; i++) burst({ count: 1000 }); pieces.length";
+    let most: u32 = panel.eval_in_frame("/plugins/particles/", bursts).await;
+    assert_eq!(most, 6000, "past twice as many, the oldest go at once");
+    panel.wait_in_frame("/plugins/particles/", "the oldest to fade out", "pieces.length === 3000").await;
+    // The setting, on the box: its words after the field; the page follows.
+    let words: String = panel
+        .eval("document.getElementById('plugin-particles-setting-most_pieces').closest('.number-row').innerText")
         .await;
-    assert!(coloured > 200, "only {coloured} coloured pixels in the preview; see {}", path.display());
+    assert_eq!(words.trim(), "pieces at most");
+    panel.click("#plugin-particles-setting-most_pieces").await;
+    panel.run("document.getElementById('plugin-particles-setting-most_pieces').select()").await;
+    panel.type_text("1000").await;
+    app.wait_for_config("at most 1000", |config| {
+        config.plugin("particles").settings.get("most_pieces").and_then(|v| v.as_f64()) == Some(1000.0)
+    })
+    .await;
+    panel.wait_in_frame("/plugins/particles/", "the setting", "mostPieces === 1000").await;
+    let most: u32 = panel.eval_in_frame("/plugins/particles/", bursts).await;
+    assert_eq!(most, 2000, "past twice the setting, the oldest go at once");
+    panel.wait_in_frame("/plugins/particles/", "the oldest to fade out", "pieces.length === 1000").await;
 
     // Show on overlay: the same run, on the overlays.
     panel.click("#plugin-particles-show").await;

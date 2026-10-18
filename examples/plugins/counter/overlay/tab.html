@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Counters</title>
+  <!-- The panel's look: its colours, buttons, fields, .box and .row. -->
+  <link rel="stylesheet" href="/plugin-tab.css">
+  <style>
+    [hidden] { display: none !important; }
+    #counters { display: flex; flex-direction: column; gap: 10px; }
+    .name { flex: 1; min-width: 0; font-weight: 500; overflow-wrap: anywhere; }
+    .count { min-width: 40px; text-align: center; font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+    button.step { width: 28px; padding: 0; }
+    #add-name { flex: 1; height: 28px; }
+  </style>
+</head>
+<body>
+  <div class="box">
+    <div id="counters">
+      <p class="muted">Nothing counted yet.</p>
+    </div>
+    <div>
+      <button type="button" class="ghost small" id="add-counter">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"
+             stroke-linecap="round" aria-hidden="true"><path d="M8 3v10M3 8h10"></path></svg>
+        Add counter
+      </button>
+      <!-- Not a <form>: a sandboxed page's forms don't submit. -->
+      <div class="row" id="add-form" hidden>
+        <input type="text" id="add-name" aria-label="Counter name" placeholder="Name" maxlength="40"
+               spellcheck="false" autocomplete="off">
+        <button type="button" class="primary small" id="add-confirm">Add</button>
+      </div>
+    </div>
+  </div>
+  <script src="tab.js"></script>
+</body>
+</html>

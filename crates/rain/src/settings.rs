@@ -1,8 +1,8 @@
 //! The Rain plugin's own settings (its manifest's `settings`, set on the
 //! Effects page), as the page gets them: `{ "type": "settings", "values" }`.
 //! A run's `changes` (a node's "Change a setting") apply over them for
-//! that run's emotes. Numbers arrive as JSON numbers, so every field is an
-//! `f64`; the manifest's bounds keep them sensible.
+//! that run's emotes. Numbers arrive as JSON numbers, so every number is
+//! an `f64`; the manifest's bounds keep them sensible.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -41,6 +41,9 @@ pub struct RainSettings {
     /// of its shorter half side: 0 = square, 1 = fully round. Rounded corners
     /// keep bottom-heavy emotes from resting on their sides.
     pub corner_rounding: f64,
+    /// No floor: emotes fall past the bottom of the screen (and past the
+    /// ones piled up there) and are gone, instead of piling up.
+    pub fall_through: bool,
 }
 
 impl Default for RainSettings {
@@ -59,6 +62,7 @@ impl Default for RainSettings {
             overlap: 0.25,
             bottom_weight: 0.8,
             corner_rounding: 0.4,
+            fall_through: false,
         }
     }
 }
@@ -90,7 +94,8 @@ mod tests {
         let settings = RainSettings::from_values(values.as_object().unwrap().clone());
         assert_eq!(settings.lifetime_ms, 4000.0);
         assert_eq!(settings.fade_ms, 1000.0, "missing: the default");
-        let changed = settings.with_changes(json!({ "restitution": 1.0 }).as_object().unwrap());
-        assert_eq!((changed.restitution, changed.lifetime_ms), (1.0, 4000.0));
+        let changed =
+            settings.with_changes(json!({ "restitution": 1.0, "fall_through": true }).as_object().unwrap());
+        assert_eq!((changed.restitution, changed.lifetime_ms, changed.fall_through), (1.0, 4000.0, true));
     }
 }

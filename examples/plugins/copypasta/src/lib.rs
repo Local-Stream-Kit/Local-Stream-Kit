@@ -67,6 +67,9 @@ impl Guest for Copypasta {
         });
     }
 
+    /// It has no tab.
+    fn on_tab(_json: String) {}
+
     fn on_chat(heard: HeardChat) {
         let HeardChat::Line(line) = heard else { return };
         let message = line.text.plain.trim().to_string();

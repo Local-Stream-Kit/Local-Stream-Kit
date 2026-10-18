@@ -1,5 +1,5 @@
 /** What the plugin and a key's settings page say to each other. */
-import type { CardState, EffectState, KindInfo } from "./protocol.js";
+import type { CardState, KindInfo, PluginState } from "./protocol.js";
 import type { Connection } from "./view.js";
 
 export type ToSettingsPage = {
@@ -10,7 +10,7 @@ export type ToSettingsPage = {
 	/** Where the app is (`http://localhost:5750`), without the key. */
 	base: string;
 	cards: CardState[];
-	effects: EffectState[];
+	plugins: PluginState[];
 	events: string[];
 	/** What a queue's clear can be limited to. */
 	kinds: KindInfo[];

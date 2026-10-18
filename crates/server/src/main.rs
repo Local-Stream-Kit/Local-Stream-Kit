@@ -241,6 +241,7 @@ async fn main() -> anyhow::Result<()> {
     files.watch();
     let secrets = plugins::secrets::PluginSecrets::open(config.dir(), Arc::clone(&plugins));
     let options = plugins::options::PluginOptions::default();
+    let tabs = plugins::tabs::PluginTabs::default();
     plugins::server::start(
         &plugins,
         plugins::server::Deps {
@@ -257,6 +258,7 @@ async fn main() -> anyhow::Result<()> {
             options: options.clone(),
             activity: activity.clone(),
             media: media.clone(),
+            tabs: tabs.clone(),
         },
     );
 
@@ -300,6 +302,7 @@ async fn main() -> anyhow::Result<()> {
         files,
         secrets,
         options,
+        tabs,
         hub: hub.clone(),
         log,
         speech_previews: Default::default(),

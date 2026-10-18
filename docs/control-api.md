@@ -3,7 +3,7 @@
 (There's a Stream Deck plugin built on this: `streamdeck/README.md`.)
 
 Lets a Stream Deck, a hotkey tool (AutoHotkey, Bitfocus Companion…) or a
-script switch cards and effects, run the queue and fire Custom events.
+script switch cards and plugins, run the queue and fire Custom events.
 It lives on the app's own port (the overlay port, 5750 unless changed),
 under `/control/`. The panel's **Status → Control API** box (a page until 2026-10-14) shows the
 key, installs the Stream Deck plugin and makes ready-to-copy URLs.
@@ -40,7 +40,7 @@ fire it twice.
 |---|---|---|
 | `/control/` or `/control/state` | nothing | the [state](#the-state) |
 | `/control/cards/{id}/on`, `/off`, `/toggle` | switches a card | `{"id", "name", "on"}` |
-| `/control/effects/{id}/on`, `/off`, `/toggle` | switches an effect | `{"id", "name", "on"}` |
+| `/control/plugins/{id}/on`, `/off`, `/toggle` | switches a plugin | `{"id", "name", "on"}` |
 | `/control/queue/pause`, `/resume`, `/toggle`, `/skip`, `/clear` | runs the queue | `{"paused", "playing", "waiting", "by_kind", "players", "on_stage", "up_next"}` |
 | `/control/items/{id}/skip` | skips one queue item | `{"id", "was"}` |
 | `/control/items/{id}/next` | plays one waiting item next | `{"id", "was"}` |
@@ -53,13 +53,17 @@ fire it twice.
   has that name. Switching a card off takes what it has waiting out of
   the queue; on again before the queue gets there, it comes back (and a
   card switched on adds what it would queue for events still waiting).
-- **Effects:** `rain`, `alert`, `sound`, `speech` today: the built-in
-  Emote rain, Alerts, Sounds and Speak plugins' switches; `speech` is
-  every voice read aloud, alerts' too (the Speak plugin's switch since
-  2026-10-14; the app's own "Read aloud" before). Take the list from the state rather than knowing it: other
-  plugins may join it. An effect switched off takes what it has waiting
-  out of the queue (speech: alerts waiting lose their read-aloud
-  message), and on again brings it back, as a card's switch does.
+- **Plugins** are switched as on the Plugins page, found by the
+  plugin's id: the built-in ones (`alert`, `chat`, `hype-train`,
+  `media`, `obs`, `particles`, `rain`, `sound`, `speak`), the ones you
+  install, programs', and the text styles (`text_styles`; no plugin's
+  id has `_`). Take the list from the state rather than knowing it.
+  `speak` is every voice read aloud, alerts' too. A plugin switched off
+  takes what it has waiting out of the queue (`speak`: alerts waiting
+  lose their read-aloud message), and on again brings it back, as a
+  card's switch does. Until 2026-10-17 (control API version 1) these
+  were `/control/effects/…` and the state's `effects`: only `rain`,
+  `alert`, `sound` and `speech`.
 - **Queue:** `toggle` pauses a running queue and resumes a paused one.
   `skip` ends what's playing now; `clear` drops everything waiting, or
   with `?kind=follow` only that kind (the kinds are in the state:
@@ -90,7 +94,7 @@ fire it twice.
   `/control/events/party?colour=red` makes `{colour}` say "red".
 
 Errors come back as `{"error": "…"}` with a status: `401` (no key, or the
-wrong one), `404` (no such card, effect or action, or an item id that
+wrong one), `404` (no such card, plugin or action, or an item id that
 isn't a number), `400` (a body that isn't a JSON object), `503` (the app
 is shutting down).
 
@@ -108,9 +112,9 @@ curl -X POST -H "X-Control-Key: YOURKEY" -d '{"colour":"red"}' http://localhost:
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "cards": [{ "id": "hydrate", "name": "Hydrate", "on": true }],
-  "effects": [{ "id": "rain", "name": "Emote rain", "on": true }],
+  "plugins": [{ "id": "rain", "name": "Emote rain", "on": true }],
   "events": ["party"],
   "queue": {
     "paused": false, "playing": true, "waiting": 2,
@@ -144,12 +148,14 @@ curl -X POST -H "X-Control-Key: YOURKEY" -d '{"colour":"red"}' http://localhost:
 - `queue.players` counts overlays showing plugin pages (since
   2026-10-11; before, overlays that play alerts); with none, the queue
   waits.
-- The `alert` effect is the built-in Alerts plugin's switch (2026-10-11).
-- The `rain` effect is the built-in Rain plugin's switch (2026-10-11).
-- The `sound` effect is the built-in Sounds plugin's switch (the Sound
-  nodes), since 2026-10-11; alert sounds don't follow it (mute does).
-- `version` goes up only when a change would break existing clients. New
-  fields can appear at any time: ignore the ones you don't know.
+- `plugins` lists every plugin and the text styles by name, as the
+  Plugins page does: `id` is the plugin's, `name` its name. It changes
+  when a plugin is installed or removed, or a program connects. The
+  `sound` plugin is the Sound nodes; alert sounds don't follow it (mute
+  does).
+- `version` goes up only when a change would break existing clients (2
+  since 2026-10-17, when `effects` became `plugins`). New fields can
+  appear at any time: ignore the ones you don't know.
 
 ## WebSocket
 
@@ -164,7 +170,7 @@ Requests are messages too, each answered:
 |---|---|
 | `{"type": "state"}` | `{"type": "state", "state": {…}}` |
 | `{"type": "card", "id": "hydrate", "set": "toggle"}` | `{"type": "card", "card": {…}}` |
-| `{"type": "effect", "id": "rain", "set": "off"}` | `{"type": "effect", "effect": {…}}` |
+| `{"type": "plugin", "id": "rain", "set": "off"}` | `{"type": "plugin", "plugin": {…}}` |
 | `{"type": "queue", "action": "skip"}` | `{"type": "queue", "queue": {…}}` |
 | `{"type": "queue", "action": "clear", "kind": "follow"}` | `{"type": "queue", "queue": {…}}` |
 | `{"type": "skip_item", "id": 42}` | `{"type": "skipped_item", "id": 42, "was": "waiting"}` |
@@ -172,26 +178,39 @@ Requests are messages too, each answered:
 | `{"type": "mute", "set": "toggle"}` | `{"type": "sound", "sound": {…}}` |
 | `{"type": "history_seen"}` | `{"type": "history", "history": {"new": 0}}` |
 | `{"type": "event", "name": "party", "data": {"colour": "red"}}` | `{"type": "fired", "name": "party"}` |
-| `{"type": "hello", "client": "streamdeck", "version": "0.2.0.0"}` | `{"type": "hello", "version": "0.1.1"}` |
+| `{"type": "hello", "client": "streamdeck", "version": "0.3.0.0", "api": 2}` | `{"type": "hello", "version": "0.2.0"}` |
 | `{"type": "register", "plugin": {…}}` (its `icon`, if any, is the SVG itself) | `{"type": "registered", "plugin": "billybilly"}` |
 | `{"type": "emit", "node": "membership", "values": {…}}` | `{"type": "emitted", "node": "membership"}` |
 | `{"type": "emit", "node": "membership", "output": "ended", "values": {…}}` | `{"type": "emitted", "node": "membership"}` |
+| `{"type": "emit", "to": "wow/3", "values": {…}}` | `{"type": "emitted", "node": "said"}` |
+| `{"type": "routed", "run": 12, "output": "regular", "values": {…}}` | none (an `error` if refused) |
+| `{"type": "computed", "run": 13, "values": {…}}` | none (an `error` if refused) |
 
-`hello` says which program this is and its version, once it's
-connected; the answer has the app's version. The Stream Deck plugin sends
-it with `client` `streamdeck` and its manifest's version, and the panel's
+`hello` says which program this is, its version and the control API
+version it speaks (`api`; 1 when left out), once it's connected; the
+answer has the app's version. The Stream Deck plugin sends it with
+`client` `streamdeck` and its manifest's version, and the panel's
 Status → Control API shows that version while it's connected, offering
-**Update** when the plugin built into the app is newer. Other programs may
+**Update** when the plugin built into the app is newer. A Stream Deck
+plugin whose `api` is older than the app's hangs up on seeing the state;
+Status says it's too old and offers **Update** until one that speaks the
+app's connects. Other programs may
 send one too (any name up to 64 characters, a version up to 32): it's
 logged, and changes nothing else. A second hello replaces the first. A
 hello without a name is answered with a `400` error. WebSocket only.
 
 `register` and `emit` make the connection a plugin (the external
 connection API): a program declares node types, fires its event nodes
-(`output` fires another of a node's outputs of type `event` than `event`), and
-is sent `{"type": "run", …}` when its effect nodes fire. A plugin with
-`voices` is also sent `{"type": "speak", "request": 7, …}` and answers
-`{"type": "spoken", "request": 7, "audio": "<base64>", "format": "wav"}`. See
+(`output` fires another of a node's outputs of type `event` than `event`;
+`to` only one copy of it on the cards, from the `{"type": "nodes", …}` it's
+sent), and is sent `{"type": "run", …}` when its effect nodes fire. A
+plugin with `voices` is also sent `{"type": "speak", "request": 7, …}` and
+answers `{"type": "spoken", "request": 7, "audio": "<base64>", "format":
+"wav"}`; one with flow nodes is sent `{"type": "route", "run": 12, …}` and
+answers `routed`; one with value nodes is sent `{"type": "compute", "run":
+13, …}` and answers `computed`. With `hears` allowed, it's sent the chat
+(`chat`, `chat_removed`, `chat_user_removed`, `chat_cleared`) and every
+event (`heard_event`). See
 [writing-a-plugin.md → Programs](writing-a-plugin.md#programs).
 
 A request that fails is answered `{"type": "error", "status": 404,
@@ -199,7 +218,7 @@ A request that fails is answered `{"type": "error", "status": 404,
 
 ## Later
 
-- Plugins (Phase 5): plugin effects appear in `effects`; plugins may offer
-  their own buttons, which would come as a `controls` list.
+- Plugins may offer their own buttons, which would come as a `controls`
+  list.
 - Keys of their own for other programs, maybe with limits (read-only,
   events only). The key file already holds a list.

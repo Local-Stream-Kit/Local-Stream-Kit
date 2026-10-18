@@ -4,7 +4,8 @@
   "version": "0.1.0",
   "api": 1,
   "author": "Local Stream Kit",
-  "description": "Counts things (hugs, deaths, …), keeps the counts between streams, and shows a count on the overlay when it changes. Every other lets every second event through.",
+  "description": "Counts things (hugs, deaths, …), keeps the counts between streams, and shows a count on the overlay when it changes; its tab sets a count right. Current count gives a counter's count to any card. Every other lets every second event through.",
+  "tab": { "label": "Counters", "page": "tab.html" },
   "nodes": [
     {
       "id": "count",
@@ -30,6 +31,17 @@
         { "name": "counter", "label": "Counter", "type": "text" },
         { "name": "count", "label": "Count", "type": "number" },
         { "name": "summary", "label": "Summary", "type": "text" }
+      ]
+    },
+    {
+      "id": "current",
+      "title": "Current count",
+      "category": "values",
+      "outputs": [
+        { "name": "count", "label": "Count", "type": "number" }
+      ],
+      "settings": [
+        { "key": "counter", "label": "Counter", "type": "text", "default": "Hugs" }
       ]
     },
     {

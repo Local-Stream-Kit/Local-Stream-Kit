@@ -194,8 +194,8 @@ impl App {
 
     /// Waits until the server code of each of `plugins` is running (it
     /// compiled, and `start` was called) since the server last started.
-    /// What's sent to it meanwhile waits for it, but a debug build takes a
-    /// second or more to compile one, and longer under the full suite's
+    /// What's sent to it meanwhile waits for it, but compiling one takes a
+    /// debug build a few tenths of a second, longer under the full suite's
     /// load, so a test that times what comes back (an overlay's
     /// [`TIMEOUT`]) waits for this first.
     pub async fn wait_running(&self, plugins: &[&str]) {
@@ -508,10 +508,56 @@ impl Panel {
 
     /// A screenshot of the page as base64 PNG, also saved to `path`.
     pub async fn screenshot(&self, path: &Path) -> String {
+        use base64::Engine;
         let shot = self.page.execute(CaptureScreenshotParams::default()).await.expect("take a screenshot");
         let base64: &str = shot.result.data.as_ref();
-        let _ = self.page.save_screenshot(CaptureScreenshotParams::default(), path).await;
+        if let Ok(png) = base64::engine::general_purpose::STANDARD.decode(base64) {
+            let _ = std::fs::write(path, png);
+        }
         base64.to_string()
+    }
+
+    /// How many pixels of a screenshot pass `pixel`, a JavaScript test of
+    /// `r`, `g` and `b` (`r > 180 && g < 90 && b < 90`), inside the element
+    /// `within` (a JavaScript expression; `None`: the whole page). The
+    /// screenshot is saved to `path`.
+    pub async fn pixels(&self, path: &Path, within: Option<&str>, pixel: &str) -> u32 {
+        let png = self.screenshot(path).await;
+        self.eval(&format!(
+            "(async () => {{ const within = {}; const image = new Image(); \
+             image.src = 'data:image/png;base64,{png}'; await image.decode(); \
+             const canvas = document.createElement('canvas'); canvas.width = image.width; canvas.height = image.height; \
+             const context = canvas.getContext('2d'); context.drawImage(image, 0, 0); \
+             const box = within?.getBoundingClientRect(), ratio = devicePixelRatio; \
+             const d = (box ? context.getImageData(box.left * ratio, box.top * ratio, box.width * ratio, box.height * ratio) \
+                            : context.getImageData(0, 0, canvas.width, canvas.height)).data; \
+             let count = 0; \
+             for (let i = 0; i < d.length; i += 4) {{ const [r, g, b] = [d[i], d[i + 1], d[i + 2]]; if ({pixel}) count++; }} \
+             return count; }})()",
+            within.unwrap_or("null")
+        ))
+        .await
+    }
+
+    /// Takes screenshots until [`Panel::pixels`]' count passes `enough`, for
+    /// at most `time`, and returns the last count: a page draws late on a
+    /// busy machine, so one screenshot after a fixed sleep can come too early.
+    pub async fn wait_pixels(
+        &self,
+        time: Duration,
+        path: &Path,
+        within: Option<&str>,
+        pixel: &str,
+        enough: impl Fn(u32) -> bool,
+    ) -> u32 {
+        let deadline = Instant::now() + time;
+        loop {
+            let count = self.pixels(path, within, pixel).await;
+            if enough(count) || Instant::now() >= deadline {
+                return count;
+            }
+            sleep(Duration::from_millis(100)).await;
+        }
     }
 
     async fn launch(app: &App, url: &str) -> Panel {
@@ -531,11 +577,62 @@ impl Panel {
             .expect("couldn't start a browser; install Edge or Chrome (or set CHROME to its path)");
         let handler = tokio::spawn(async move { while handler.next().await.is_some() {} });
         let page = browser.new_page("about:blank").await.expect("open a page");
-        page.evaluate_on_new_document(AddScriptToEvaluateOnNewDocumentParams::new(SOCKET_HOOK))
+        page.evaluate_on_new_document(AddScriptToEvaluateOnNewDocumentParams::new(PAGE_HOOK))
             .await
-            .expect("add the socket hook");
+            .expect("add the page hook");
         page.goto(url).await.expect("open the page");
         Panel { page, browser, handler }
+    }
+
+    /// Evaluates a JavaScript expression in the page of the iframe whose
+    /// address has `url` in it. The plugins' pages are sandboxed, so the
+    /// browser runs them in a process of their own, out of [`Panel::eval`]'s
+    /// reach: this attaches to the iframe's own DevTools target, over a
+    /// second connection to the browser.
+    pub async fn eval_in_frame<T: DeserializeOwned>(&self, url: &str, expression: &str) -> T {
+        match self.try_eval_in_frame(url, expression).await {
+            Some(value) => value,
+            None => panic!("no iframe at {url}"),
+        }
+    }
+
+    /// Waits until `expression` is true in the page of the iframe whose
+    /// address has `url` in it (once there is one), as [`Panel::wait`].
+    pub async fn wait_in_frame(&self, url: &str, what: &str, expression: &str) {
+        let deadline = Instant::now() + TIMEOUT;
+        loop {
+            if self.try_eval_in_frame::<bool>(url, expression).await == Some(true) {
+                return;
+            }
+            if Instant::now() > deadline {
+                panic!("timed out waiting for {what} in {url}: {expression}");
+            }
+            sleep(Duration::from_millis(100)).await;
+        }
+    }
+
+    /// [`Panel::eval_in_frame`], or `None` while there's no such iframe.
+    async fn try_eval_in_frame<T: DeserializeOwned>(&self, url: &str, expression: &str) -> Option<T> {
+        let address = self.browser.websocket_address();
+        let (mut socket, _) =
+            tokio_tungstenite::connect_async(address.as_str()).await.expect("connect to the browser");
+        let targets = devtools_call(&mut socket, 1, None, "Target.getTargets", serde_json::json!({})).await;
+        let target = targets["targetInfos"].as_array().into_iter().flatten().find(|target| {
+            target["type"] == "iframe" && target["url"].as_str().is_some_and(|at| at.contains(url))
+        })?;
+        let attach = serde_json::json!({ "targetId": target["targetId"], "flatten": true });
+        let attached = devtools_call(&mut socket, 2, None, "Target.attachToTarget", attach).await;
+        let session = attached["sessionId"].as_str().expect("a session");
+        let evaluate = serde_json::json!({ "expression": expression, "returnByValue": true });
+        let result = devtools_call(&mut socket, 3, Some(session), "Runtime.evaluate", evaluate).await;
+        if let Some(exception) = result.get("exceptionDetails") {
+            panic!("JavaScript failed in {url}: {exception}\n{expression}");
+        }
+        Some(
+            serde_json::from_value(result["result"]["value"].clone()).unwrap_or_else(|error| {
+                panic!("unexpected JavaScript result {result}: {error}\n{expression}")
+            }),
+        )
     }
 
     /// Closes the browser. (Dropping the panel kills it too.)
@@ -601,8 +698,20 @@ impl Panel {
         let deadline = Instant::now() + time;
         let check = format!("return !!({expression});");
         while self.try_call(&check).await.ok() != Some(serde_json::Value::Bool(true)) {
-            assert!(Instant::now() < deadline, "timed out waiting for {what} ({expression})");
+            if Instant::now() >= deadline {
+                panic!("timed out waiting for {what} ({expression})\n{}", self.state().await);
+            }
             sleep(POLL).await;
+        }
+    }
+
+    /// Where the page had got to, for a failed wait: how far it loaded, its
+    /// sockets and what they got, its iframes, and how long each file took.
+    pub async fn state(&self) -> String {
+        match self.try_call(PAGE_STATE).await {
+            Ok(serde_json::Value::String(state)) => state,
+            Ok(other) => format!("page state: {other}"),
+            Err(error) => format!("page state unknown: {error}"),
         }
     }
 
@@ -842,18 +951,110 @@ impl Panel {
     }
 }
 
-/// Runs before the panel's own code: keeps its WebSockets reachable, so
+/// Sends a DevTools command (to a target's `session`, or the browser) and
+/// returns its result, skipping the events and answers that come between.
+async fn devtools_call(
+    socket: &mut tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<TcpStream>>,
+    id: u64,
+    session: Option<&str>,
+    method: &str,
+    params: serde_json::Value,
+) -> serde_json::Value {
+    let mut request = serde_json::json!({ "id": id, "method": method, "params": params });
+    if let Some(session) = session {
+        request["sessionId"] = session.into();
+    }
+    socket.send(Message::text(request.to_string())).await.expect("send a DevTools command");
+    loop {
+        let message = tokio::time::timeout(TIMEOUT, socket.next())
+            .await
+            .unwrap_or_else(|_| panic!("timed out waiting for DevTools to answer {method}"))
+            .expect("the DevTools connection is open")
+            .expect("a message");
+        let Message::Text(text) = message else { continue };
+        let answer: serde_json::Value = serde_json::from_str(&text).expect("DevTools answers in JSON");
+        if answer["id"] == id {
+            if let Some(error) = answer.get("error") {
+                panic!("DevTools refused {method}: {error}");
+            }
+            return answer["result"].clone();
+        }
+    }
+}
+
+/// Runs before the page's own code: keeps its WebSockets reachable, so
 /// [`Panel::receive`] can hand it messages.
 /// It also records the type of every message the server sends, in
-/// `window.__panelReceived`, and each socket's own in its `__received`.
-const SOCKET_HOOK: &str = "(() => { \
-    const Native = window.WebSocket; window.__panelSockets = []; window.__panelReceived = []; \
-    window.WebSocket = class extends Native { \
-        constructor(...args) { \
-            super(...args); window.__panelSockets.push(this); this.__received = []; \
-            this.addEventListener('message', event => { \
-                try { const type = JSON.parse(event.data).type; \
-                      window.__panelReceived.push(type); this.__received.push(type); } catch {} }); } }; })()";
+/// `window.__panelReceived`, and each socket's own in its `__received`;
+/// for [`PAGE_STATE`], when each socket opened and first got each type,
+/// when the page's WebAssembly started, and when its iframes came, went,
+/// loaded (an iframe that's moved loads again) and had their window read
+/// (to post them a message).
+const PAGE_HOOK: &str = r#"(() => {
+    addEventListener('TrunkApplicationStarted', () => window.__started = performance.now());
+    window.__frames = [];
+    const note = (what, frame) =>
+        window.__frames.push(`${what} ${frame.id || frame.getAttribute('src')} ${Math.round(performance.now())}`);
+    const framesIn = node => !node.querySelectorAll ? []
+        : [...(node.tagName === 'IFRAME' ? [node] : []), ...node.querySelectorAll('iframe')];
+    const inPage = new WeakSet();
+    new MutationObserver(records => {
+        for (const record of records) {
+            for (const frame of [...record.addedNodes].flatMap(framesIn)) {
+                if (!inPage.has(frame)) { inPage.add(frame); note('added', frame); }
+            }
+            for (const frame of [...record.removedNodes].flatMap(framesIn)) {
+                if (inPage.delete(frame)) note('removed', frame);
+            }
+        }
+    }).observe(document, { childList: true, subtree: true });
+    document.addEventListener('load', event => {
+        if (event.target.tagName === 'IFRAME') note('loaded', event.target);
+    }, true);
+    // Read to post the page a message.
+    const contentWindow = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, 'contentWindow');
+    Object.defineProperty(HTMLIFrameElement.prototype, 'contentWindow', {
+        ...contentWindow,
+        get() { note('window read', this); return contentWindow.get.call(this); },
+    });
+    const Native = window.WebSocket; window.__panelSockets = []; window.__panelReceived = [];
+    window.WebSocket = class extends Native {
+        constructor(...args) {
+            super(...args); window.__panelSockets.push(this); this.__received = [];
+            this.__created = performance.now(); this.__first = {};
+            this.addEventListener('message', event => {
+                try {
+                    const type = JSON.parse(event.data).type;
+                    window.__panelReceived.push(type); this.__received.push(type);
+                    this.__first[type] ??= performance.now();
+                } catch {}
+            });
+        }
+    };
+})()"#;
+
+/// The page's state as text, for [`Panel::state`]. Times are in ms since
+/// the page started loading.
+const PAGE_STATE: &str = r#"
+    const ms = time => time == null ? '–' : Math.round(time);
+    const nav = performance.getEntriesByType('navigation')[0];
+    const lines = [
+        `page ${location.href}: ${document.readyState} at ${ms(performance.now())} ms, `
+            + `DOMContentLoaded ${ms(nav?.domContentLoadedEventEnd)}, load ${ms(nav?.loadEventEnd)}, `
+            + `WebAssembly started ${ms(window.__started)}`,
+        `shows: ${(document.body?.innerText ?? '').replace(/\s+/g, ' ').trim().slice(0, 160)}`,
+    ];
+    for (const [i, socket] of (window.__panelSockets ?? []).entries()) {
+        const first = Object.entries(socket.__first).map(([type, at]) => `${type} ${ms(at)}`).join(', ');
+        lines.push(`socket ${i}: made ${ms(socket.__created)}, state ${socket.readyState}, `
+            + `${socket.__received.length} messages, first of each: ${first}`);
+    }
+    if (window.__frames?.length) lines.push(`iframes, ms: ${window.__frames.join(', ')}`);
+    for (const file of performance.getEntriesByType('resource')) {
+        lines.push(`${ms(file.startTime)}–${ms(file.responseEnd)} ms: ${file.name}`);
+    }
+    return lines.join('\n');
+"#;
 
 /// A Rust string as a JavaScript string literal.
 pub fn js_string(text: &str) -> String {

@@ -15,7 +15,9 @@ export type Connection =
 	/** Nothing answers at the address. */
 	| "unreachable"
 	/** The app speaks a newer control API than this plugin. */
-	| "too-new";
+	| "too-new"
+	/** The app speaks an older control API than this plugin. */
+	| "too-old";
 
 export type Look = "on" | "off" | "paused" | "plain" | "missing" | "offline";
 
@@ -27,6 +29,10 @@ export type KeyView = {
 	title: string;
 };
 
+/**
+ * The last part of each action's UUID. `effect` is Plugin on / off: it was
+ * named before effects became plugins, and keeps its UUID so keys stay.
+ */
 export type Kind = "card" | "effect" | "queue" | "event" | "mute" | "history";
 
 /** Each kind of key's settings, saved by Stream Deck per key. */
@@ -37,7 +43,13 @@ export type CardSettings = {
 	name?: string;
 	set?: Switch;
 };
-export type EffectSettings = { effect?: string; name?: string; set?: Switch };
+export type EffectSettings = {
+	/** The plugin's id. */
+	effect?: string;
+	/** Its name when picked, for while the app is away. */
+	name?: string;
+	set?: Switch;
+};
 export type QueueSettings = {
 	action?: QueueAction;
 	/** A clear takes only this kind (`follow`). */
@@ -82,6 +94,8 @@ export function offlineLabel(connection: Connection): string {
 			return "WRONG KEY";
 		case "too-new":
 			return "UPDATE";
+		case "too-old":
+			return "UPDATE APP";
 		default:
 			return "OFFLINE";
 	}
@@ -152,17 +166,17 @@ export function cardView(settings: CardSettings, state: ControlState | undefined
 
 export function effectView(settings: EffectSettings, state: ControlState | undefined, connection: Connection): KeyView {
 	if (!settings.effect) {
-		return { look: "plain", label: "", title: "Pick an effect" };
+		return { look: "plain", label: "", title: "Pick a plugin" };
 	}
 	const known = settings.name ?? settings.effect;
 	if (connection !== "connected" || !state) {
 		return offline(known, connection);
 	}
-	const effect = state.effects.find((effect) => effect.id === settings.effect);
-	if (!effect) {
+	const plugin = state.plugins.find((plugin) => plugin.id === settings.effect);
+	if (!plugin) {
 		return { look: "missing", label: "GONE", title: known };
 	}
-	return { look: effect.on ? "on" : "off", label: switched(effect.on, settings.set), title: effect.name };
+	return { look: plugin.on ? "on" : "off", label: switched(plugin.on, settings.set), title: plugin.name };
 }
 
 export function queueView(settings: QueueSettings, state: ControlState | undefined, connection: Connection): KeyView {

@@ -13,6 +13,7 @@ pub mod position;
 pub mod sounds;
 pub mod speech;
 pub mod status;
+pub mod tab;
 pub mod test;
 pub mod text_styles;
 pub mod viewers;

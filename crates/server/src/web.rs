@@ -64,12 +64,13 @@ pub async fn serve(port: u16, state: AppState) -> anyhow::Result<()> {
         .route(protocol::speech::SPEECH_ROUTE, get(crate::services::speech::serve))
         .route(protocol::plugin::FILES_ROUTE, get(plugin_file))
         .route(protocol::plugin::ICON_ROUTE, get(plugin_icon))
+        .route(protocol::plugin::TAB_STYLE_PATH, get(tab_style))
         .route("/control", get(control::get_state))
         .route(protocol::control::CONTROL_PATH, get(control::get_state))
         .route("/control/state", get(control::get_state))
         .route(protocol::control::CONTROL_WS_PATH, get(control::websocket))
         .route("/control/cards/{id}/{set}", get(control::card).post(control::card))
-        .route("/control/effects/{id}/{set}", get(control::effect).post(control::effect))
+        .route("/control/plugins/{id}/{set}", get(control::plugin).post(control::plugin))
         .route("/control/queue/{action}", get(control::queue).post(control::queue))
         .route("/control/items/{id}/skip", get(control::skip_item).post(control::skip_item))
         .route("/control/items/{id}/next", get(control::play_next).post(control::play_next))
@@ -257,6 +258,20 @@ async fn plugin_file(
         .into_response()
 }
 
+/// The panel's look for plugins' tab pages (`protocol::plugin::TAB_STYLE_PATH`).
+async fn tab_style() -> Response {
+    (
+        [
+            (header::CONTENT_TYPE, "text/css; charset=utf-8"),
+            (header::CACHE_CONTROL, "no-cache"),
+            (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+            (header::ACCESS_CONTROL_ALLOW_ORIGIN, SANDBOXED),
+        ],
+        crate::plugins::tabs::TAB_STYLE,
+    )
+        .into_response()
+}
+
 /// A plugin's nodes' icon, which the panel draws as a mask: an image, never
 /// a page (no scripts, nothing loaded, if opened on its own).
 async fn plugin_icon(State(state): State<AppState>, Path(plugin): Path<String>) -> Response {
@@ -376,8 +391,8 @@ fn page_settings(
 
 /// For telling whether a page's settings changed: a folder stays itself,
 /// so another pick from it isn't a change.
-fn folder_as_is(_: MediaKind, folder: &str) -> Option<String> {
-    Some(format!("{folder}/"))
+fn folder_as_is(_: MediaKind, folder: &str, _: bool) -> Vec<String> {
+    vec![format!("{folder}/")]
 }
 
 /// One overlay: waits for its `Hello`, sends the overlay build, the
@@ -437,7 +452,7 @@ async fn overlay_connection(socket: WebSocket, hub: OverlayHub, panel: PanelStat
                             .filter_map(|id| {
                                 let seen = page_settings(&installed, &config, &files, id, &mut folder_as_is)?;
                                 sent_settings.insert(id.clone(), seen);
-                                let values = page_settings(&installed, &config, &files, id, &mut |kind, folder| media.pick_any(kind, folder))?;
+                                let values = page_settings(&installed, &config, &files, id, &mut |kind, folder, every| media.pick_files_any(kind, folder, every))?;
                                 Some(settings_envelope(&hub, id, values))
                             })
                             .collect();
@@ -580,7 +595,7 @@ async fn update_pages(
         let Some(seen) = page_settings(installed, &config, files, id, &mut folder_as_is) else { continue };
         if sent_settings.get(id) != Some(&seen) {
             sent_settings.insert(id.clone(), seen);
-            let mut pick = |kind, folder: &str| media.pick_any(kind, folder);
+            let mut pick = |kind, folder: &str, every| media.pick_files_any(kind, folder, every);
             let Some(values) = page_settings(installed, &config, files, id, &mut pick) else { continue };
             send(sender, &settings_envelope(hub, id, values)).await?;
         }

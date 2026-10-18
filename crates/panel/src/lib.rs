@@ -9,6 +9,7 @@ mod editor;
 mod model;
 mod rebase;
 mod route;
+mod tab_row;
 mod util;
 mod views;
 
@@ -205,6 +206,14 @@ fn App() -> Html {
         }
     } else {
         match &route {
+            // A plugin's tab: its page fills the rest of the dock.
+            Route::Tab(id) => html! {
+                <div class="dock tab-open">
+                    <Header route={route.clone()} />
+                    <Banners />
+                    <views::tab::PluginTab key={id.clone()} plugin={id.clone()} />
+                </div>
+            },
             // The header stays above the editor, so the tabs are a click away.
             Route::Card(id) => html! {
                 <div class="dock editing">
@@ -229,7 +238,7 @@ fn App() -> Html {
                             Route::Control => html! { <views::status::StatusView focus="control" /> },
                             Route::Plugins => html! { <views::plugins::PluginsView /> },
                             Route::Plugin(id) => html! { <views::plugins::PluginsView focus={id.clone()} /> },
-                            Route::Card(_) => html! {},
+                            Route::Card(_) | Route::Tab(_) => html! {},
                         } }
                     </main>
                 </div>
@@ -265,18 +274,7 @@ fn Header(props: &HeaderProps) -> Html {
     };
     let overlays = status.overlays.len();
     let plugin_problems = views::plugins::problems(&panel.model);
-    let queue = &panel.model.queue;
-    let queued = queue.waiting_count + usize::from(queue.on_stage.is_some());
-    let tab = |route: Route, label: &str| {
-        let current = props.route == route
-            || (route == Route::Cards && matches!(props.route, Route::NewCard | Route::Card(_)))
-            || (route == Route::Plugins && matches!(props.route, Route::Plugin(_)))
-            || (route == Route::Status && matches!(props.route, Route::Login | Route::Control));
-        html! {
-            <a href={route.href()} class={classes!("tab", current.then_some("current"))}
-               aria-current={current.then_some("page")}>{ label.to_string() }</a>
-        }
-    };
+    let tabs = row_tabs(&panel.model, &props.route);
     html! {
         <header class="dock-header">
             <div class="dock-title">
@@ -300,15 +298,56 @@ fn Header(props: &HeaderProps) -> Html {
                 }
                 </div>
             </div>
-            <nav class="tabs" aria-label="Sections">
-                { tab(Route::Cards, "Cards") }
-                { tab(Route::Activity, &if queued > 0 { format!("Activity ({queued})") } else { "Activity".to_string() }) }
-                { tab(Route::Plugins, "Plugins") }
-                { tab(Route::Test, "Test") }
-                { tab(Route::Status, "Status") }
-            </nav>
+            <tab_row::TabRow {tabs} />
         </header>
     }
+}
+
+/// The header's tabs, in order: Cards, Activity, the plugins' tabs (those
+/// switched on, by name, as on the Plugins page), Plugins, Test, Status.
+fn row_tabs(model: &model::Model, route: &Route) -> Rc<Vec<tab_row::RowTab>> {
+    let current = |tab: &Route| {
+        route == tab
+            || (*tab == Route::Cards && matches!(route, Route::NewCard | Route::Card(_)))
+            || (*tab == Route::Plugins && matches!(route, Route::Plugin(_)))
+            || (*tab == Route::Status && matches!(route, Route::Login | Route::Control))
+    };
+    let tab = |route: Route, label: &str, count: Option<usize>, plugin: bool| {
+        let shown = count.filter(|count| *count > 0).map(|count| format!("{label} ({count})"));
+        tab_row::RowTab {
+            current: current(&route),
+            counted: shown.is_some(),
+            label: shown.unwrap_or_else(|| label.to_string()),
+            widest: if count.is_some() { format!("{label} (99)") } else { label.to_string() },
+            plugin,
+            route,
+        }
+    };
+    let queue = &model.queue;
+    let queued = queue.waiting_count + usize::from(queue.on_stage.is_some());
+    let mut tabs =
+        vec![tab(Route::Cards, "Cards", None, false), tab(Route::Activity, "Activity", Some(queued), false)];
+    let mut plugins: Vec<_> = model
+        .plugins
+        .plugins()
+        .iter()
+        .filter(|plugin| {
+            !plugin.program
+                && model.config.as_ref().is_some_and(|config| config.plugin(&plugin.manifest.id).enabled)
+        })
+        .filter_map(|plugin| plugin.manifest.tab.as_ref().map(|spec| (plugin, spec)))
+        .collect();
+    plugins.sort_by_key(|(plugin, _)| plugin.manifest.name.to_lowercase());
+    for (plugin, spec) in plugins {
+        let count = spec.count.then_some(plugin.tab_count as usize);
+        tabs.push(tab(Route::Tab(plugin.manifest.id.clone()), &spec.label, count, true));
+    }
+    tabs.extend([
+        tab(Route::Plugins, "Plugins", None, false),
+        tab(Route::Test, "Test", None, false),
+        tab(Route::Status, "Status", None, false),
+    ]);
+    Rc::new(tabs)
 }
 
 /// Connection, save and config problems, above every page.

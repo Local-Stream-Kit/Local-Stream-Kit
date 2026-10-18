@@ -5,10 +5,11 @@ Keys for Local Stream Kit's [control API](../docs/control-api.md):
 - **Card on / off**: switches a card, shows whether it's on, and is titled
   with the card's name (it follows renames; a deleted card's key says
   DELETED).
-- **Effect on / off**: the same for emote rain, alerts, sounds and text to
-  speech (and, later, plugins' effects: the list comes from the app).
-  Switching a card or an effect off takes what it has waiting out of the
-  queue; on again, it comes back if the queue hasn't got there yet.
+- **Plugin on / off**: the same for a plugin (emote rain, alerts, text to
+  speech, your own…) or the text styles, as their switches on the
+  Plugins page. Switching a card or a plugin off takes what it has
+  waiting out of the queue; on again, it comes back if the queue hasn't
+  got there yet.
 - **Queue**: pause / resume (showing PAUSED or PLAYING), pause, resume, skip
   what's playing, clear what's waiting (everything or one kind, like
   "Clear follows", showing how many wait).
@@ -35,12 +36,17 @@ Then drag a Local Stream Kit key onto your Stream Deck, and paste the
 **Address** from the same Control API box into the key's **Address**.
 Every key shares it, so it's pasted once.
 
-The plugin has a version of its own, in its manifest (`0.2.0.0`), raised
+The plugin has a version of its own, in its manifest (`0.3.0.0`), raised
 only when the plugin changes. It tells the app its version when it
-connects, and Status shows it ("0.2.0 connected"). When the app has a
+connects, and Status shows it ("0.3.0 connected"). When the app has a
 newer one built in, Status offers **Update**, which installs it the same
 way. The first plugin, 0.1.0.0,
 doesn't say its version, so Status doesn't show it: Install replaces it.
+When the app and the plugin speak different versions of the control
+API, the keys say UPDATE (the plugin is older) or UPDATE APP (the app
+is older). Plugins before 0.3.0.0 speak version 1, apps since
+2026-10-17 version 2. An older plugin still says hello before it hangs
+up, so Status says it's too old and offers **Update**.
 
 From the source:
 

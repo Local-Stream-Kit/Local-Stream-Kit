@@ -38,6 +38,7 @@ pub mod net;
 pub mod options;
 pub mod secrets;
 pub mod server;
+pub mod tabs;
 
 /// The plugins that ship with the app. Debug builds read them from disk;
 /// release builds embed them (see `build.rs`).
@@ -67,6 +68,8 @@ pub struct Plugins {
     /// The notes plugins' server code puts under their settings, by plugin
     /// and setting key.
     notes: Mutex<BTreeMap<String, BTreeMap<String, PluginNote>>>,
+    /// The numbers plugins' server code puts on their tabs (none at 0).
+    tab_counts: Mutex<BTreeMap<String, u32>>,
     /// Bumped whenever a program connects or goes, or server code stops.
     changes: watch::Sender<u64>,
 }
@@ -124,6 +127,7 @@ impl Plugins {
             stopped: Mutex::default(),
             statuses: Mutex::default(),
             notes: Mutex::default(),
+            tab_counts: Mutex::default(),
             remembered: None,
             changes: watch::channel(0).0,
         }
@@ -368,6 +372,7 @@ impl Plugins {
         let stopped = self.stopped.lock().unwrap();
         let statuses = self.statuses.lock().unwrap();
         let notes = self.notes.lock().unwrap();
+        let tab_counts = self.tab_counts.lock().unwrap();
         let installed = self.installed();
         let programs =
             programs.values().filter(|plugin| installed.plugin(&plugin.manifest.id).is_none()).cloned();
@@ -375,6 +380,7 @@ impl Plugins {
             stopped: stopped.get(&plugin.manifest.id).cloned(),
             status: statuses.get(&plugin.manifest.id).cloned(),
             notes: notes.get(&plugin.manifest.id).cloned().unwrap_or_default(),
+            tab_count: tab_counts.get(&plugin.manifest.id).copied().unwrap_or(0),
             ..plugin.clone()
         });
         Catalog::new(installed.chain(programs).collect())
@@ -423,16 +429,18 @@ impl Plugins {
         self.stopped.lock().unwrap().insert(id.to_string(), reason);
         self.statuses.lock().unwrap().remove(id);
         self.notes.lock().unwrap().remove(id);
+        self.tab_counts.lock().unwrap().remove(id);
         self.changes.send_modify(|count| *count += 1);
     }
 
-    /// Forgets why a plugin's server code stopped, its status and its
-    /// notes (it's starting again, or gone).
+    /// Forgets why a plugin's server code stopped, its status, its notes
+    /// and its tab's number (it's starting again, or gone).
     pub fn clear_stopped(&self, id: &str) {
         let stopped = self.stopped.lock().unwrap().remove(id).is_some();
         let status = self.statuses.lock().unwrap().remove(id).is_some();
         let notes = self.notes.lock().unwrap().remove(id).is_some();
-        if stopped || status || notes {
+        let count = self.tab_counts.lock().unwrap().remove(id).is_some();
+        if stopped || status || notes || count {
             self.changes.send_modify(|count| *count += 1);
         }
     }
@@ -446,6 +454,20 @@ impl Plugins {
             None => statuses.remove(id).is_some(),
         };
         drop(statuses);
+        if changed {
+            self.changes.send_modify(|count| *count += 1);
+        }
+    }
+
+    /// A plugin's server code puts a number on its tab (0 takes it away).
+    /// Panels are told only when it changed.
+    pub fn set_tab_count(&self, id: &str, count: u32) {
+        let mut counts = self.tab_counts.lock().unwrap();
+        let changed = match count {
+            0 => counts.remove(id).is_some(),
+            count => counts.insert(id.to_string(), count) != Some(count),
+        };
+        drop(counts);
         if changed {
             self.changes.send_modify(|count| *count += 1);
         }
@@ -494,19 +516,14 @@ impl Plugins {
         {
             problems.push(format!("node {:?}: a program's effect nodes can't have outputs yet", node.id));
         }
-        if let Some(node) =
-            manifest.nodes.iter().find(|node| matches!(node.category, Category::Flow | Category::Values))
-        {
-            problems.push(format!("node {:?}: a program can't have flow or value nodes yet", node.id));
-        }
-        if manifest.hears.iter().any(|what| what == protocol::plugin::HEARS_EVENTS) {
-            problems.push("a program can't hear events yet".into());
-        }
         if self.installed().plugin(&id).is_some() {
             problems.push(format!("the {id} plugin is installed in the app, so a program can't use its id"));
         }
         if !manifest.icon.is_empty() && manifest.icon_markup().is_none() {
             problems.push("icon: a program gives the SVG itself (<svg …>…</svg>), not a file".into());
+        }
+        if manifest.tab.is_some() {
+            problems.push("tab: a program has no page files for a tab".into());
         }
         let mut programs = self.programs.lock().unwrap();
         if programs.get(&id).is_some_and(|known| known.connected) {
@@ -562,9 +579,10 @@ impl Plugins {
     }
 
     /// A file in a plugin's `overlay/` folder, if the plugin is installed
-    /// and `path` stays inside that folder.
+    /// and `path` stays inside that folder. (A plugin with a tab or help
+    /// but no overlay page has page files too.)
     pub fn overlay_file(&self, plugin: &str, path: &str) -> Option<PluginFile> {
-        let info = self.installed().plugin(plugin).filter(|plugin| plugin.overlay)?.clone();
+        let info = self.installed().plugin(plugin)?.clone();
         if !is_relative_path(path) {
             return None;
         }
@@ -644,6 +662,12 @@ fn check(
     }
     if !manifest.icon.is_empty() && manifest.icon_markup().is_none() && !has_file(&manifest.icon) {
         problems.push(format!("icon {:?}: there's no such file in its folder", manifest.icon));
+    }
+    if let Some(tab) = &manifest.tab
+        && !problems.iter().any(|problem| problem.starts_with("tab:"))
+        && !has_file(&format!("{OVERLAY_DIR}/{}", tab.page))
+    {
+        problems.push(format!("tab: its page {OVERLAY_DIR}/{} isn't there", tab.page));
     }
     if !manifest.voices.is_empty() && !server {
         problems.push(format!(
@@ -846,6 +870,20 @@ mod tests {
         let mut media = manifest.clone();
         media.id = "media".into();
         assert!(plugins.connect(media).unwrap_err()[0].contains("installed in the app"));
+        // Flow and value nodes, and hearing events, as server code has them.
+        let answering: Manifest = serde_json::from_value(json!({
+            "id": "regulars", "name": "Regulars", "version": "1.0.0", "api": 1,
+            "hears": ["chat", "events"],
+            "nodes": [
+                { "id": "first", "title": "Regulars first", "category": "flow",
+                  "inputs": [{ "name": "event", "label": "Event", "type": "event" }],
+                  "outputs": [{ "name": "regular", "label": "Regular", "type": "event" }] },
+                { "id": "messages", "title": "Messages", "category": "values",
+                  "outputs": [{ "name": "count", "label": "Count", "type": "number" }] }
+            ]
+        }))
+        .unwrap();
+        assert_eq!(plugins.connect(answering), Ok(()));
 
         plugins.disconnect("billybilly");
         assert!(changes.has_changed().unwrap());

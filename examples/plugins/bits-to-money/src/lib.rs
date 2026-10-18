@@ -72,6 +72,9 @@ impl Guest for BitsToMoney {
     /// It has no event nodes.
     fn nodes_changed(_nodes: Vec<PlacedNode>) {}
 
+    /// It has no tab.
+    fn on_tab(_json: String) {}
+
     fn on_timer(_id: u32) {}
 
     fn on_response(_id: u32, _response: Result<Response, String>) {}

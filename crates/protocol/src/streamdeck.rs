@@ -64,14 +64,20 @@ pub struct StreamDeckStatus {
     /// Why the last Install failed (until one works).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub install_error: Option<String>,
+    /// The version of a plugin that said hello but speaks an older control
+    /// API, so it hung up (2026-10-17); forgotten once one that speaks the
+    /// app's connects.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub too_old: Option<String>,
 }
 
 impl StreamDeckStatus {
-    /// A connected plugin is older than the built-in one: Install updates it.
+    /// A plugin older than the built-in one connected, or one too old to
+    /// stay: Install updates it.
     pub fn update_offered(&self) -> bool {
-        self.built_in
-            .as_deref()
-            .is_some_and(|built_in| self.connected.iter().any(|version| is_older(version, built_in)))
+        self.built_in.as_deref().is_some_and(|built_in| {
+            self.too_old.is_some() || self.connected.iter().any(|version| is_older(version, built_in))
+        })
     }
 }
 
@@ -99,10 +105,14 @@ mod tests {
             built_in: Some("0.1.1.0".into()),
             connected: vec!["0.1.1.0".into()],
             install_error: None,
+            too_old: None,
         };
         assert!(!status.update_offered());
         status.connected.push("0.1.0.0".into());
         assert!(status.update_offered());
+        status.connected.clear();
+        status.too_old = Some("0.1.0.0".into());
+        assert!(status.update_offered(), "one that hung up");
         status.built_in = None;
         assert!(!status.update_offered(), "nothing to update it with");
         assert_eq!(

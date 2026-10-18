@@ -5,6 +5,10 @@
   "api": 1,
   "author": "Local Stream Kit",
   "preview": { "node": "burst" },
+  "settings": [
+    { "key": "most_pieces", "label": "Most pieces on screen", "short": "On screen", "caption": "pieces at most",
+      "type": "number", "default": 3000, "min": 100, "max": 10000 }
+  ],
   "nodes": [
     {
       "id": "burst",
@@ -29,7 +33,10 @@
             { "value": "picture", "label": "A picture" }
           ]
         },
-        { "key": "picture", "label": "Picture", "type": "picture" },
+        { "key": "picture", "label": "Picture", "type": "picture", "many": true,
+          "when": { "is": { "shape": "picture" } } },
+        { "key": "flip_x", "label": "Some mirrored", "type": "bool", "when": { "is": { "shape": "picture" } } },
+        { "key": "flip_y", "label": "Some upside down", "type": "bool", "when": { "is": { "shape": "picture" } } },
         {
           "key": "from",
           "label": "From",
@@ -39,7 +46,8 @@
             { "value": "corners", "label": "The bottom corners" },
             { "value": "top", "label": "The top" },
             { "value": "bottom", "label": "The bottom" },
-            { "value": "middle", "label": "The middle" }
+            { "value": "middle", "label": "The middle" },
+            { "value": "fireworks", "label": "Fireworks" }
           ]
         },
         { "key": "colour", "label": "Colour", "type": "colour", "default": "#ff4f8b" },

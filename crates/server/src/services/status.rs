@@ -43,6 +43,8 @@ struct State {
     stream_decks: BTreeMap<u64, String>,
     next_stream_deck: u64,
     stream_deck_install_error: Option<String>,
+    /// The version of a Stream Deck plugin too old for the control API.
+    stream_deck_too_old: Option<String>,
     /// A second Twitch login waiting for approval.
     renewal: Option<protocol::panel::LoginCode>,
 }
@@ -133,15 +135,24 @@ impl StatusHub {
     }
 
     /// Counts a Stream Deck plugin of this version as connected until the
-    /// guard is dropped.
+    /// guard is dropped. One too old for the control API is forgotten: this
+    /// one replaced it.
     pub fn stream_deck_connected(&self, version: String) -> StreamDeckGuard {
         let mut id = 0;
         self.update(|state| {
             id = state.next_stream_deck;
             state.next_stream_deck += 1;
             state.stream_decks.insert(id, version);
+            state.stream_deck_too_old = None;
         });
         StreamDeckGuard { hub: self.clone(), id }
+    }
+
+    /// A Stream Deck plugin of this version said hello, but speaks an older
+    /// control API: it hangs up, and Status offers its update until one that
+    /// speaks the app's connects.
+    pub fn stream_deck_too_old(&self, version: String) {
+        self.update(|state| state.stream_deck_too_old = Some(version));
     }
 
     /// Why the last Install failed; `None` when it worked.
@@ -174,6 +185,7 @@ impl StatusHub {
                 built_in: crate::streamdeck::built_in(),
                 connected: state.stream_decks.values().cloned().collect(),
                 install_error: state.stream_deck_install_error.clone(),
+                too_old: state.stream_deck_too_old.clone(),
             },
             renewal: state.renewal.clone(),
         }
@@ -252,5 +264,12 @@ mod tests {
         assert_eq!(hub.snapshot(&registry, vec![]).stream_deck.connected, ["0.1.1.0"]);
         drop(new);
         assert!(hub.snapshot(&registry, vec![]).stream_deck.connected.is_empty());
+        // One too old for the control API is remembered until a current one
+        // connects.
+        hub.stream_deck_too_old("0.2.1.0".into());
+        assert_eq!(hub.snapshot(&registry, vec![]).stream_deck.too_old.as_deref(), Some("0.2.1.0"));
+        let current = hub.stream_deck_connected("0.3.0.0".into());
+        assert_eq!(hub.snapshot(&registry, vec![]).stream_deck.too_old, None);
+        drop(current);
     }
 }

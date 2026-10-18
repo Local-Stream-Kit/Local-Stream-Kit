@@ -8,9 +8,12 @@ menu. How to write your own is in
 
 - **confetti**: a Confetti effect node and the overlay page that draws it.
   No server code: when the node fires, its page gets the node's values.
-- **counter**: a Count effect node and a Counted event node, with server
-  code in Rust (`src/lib.rs`) that keeps the counts between streams, and
-  an overlay page that shows a count when it changes. Build its
+- **counter**: a Count effect node, a Counted event node and a Current
+  count value node (two counters in one text: `W:{wins} L:{losses}`),
+  with server code in Rust (`src/lib.rs`) that keeps the counts between
+  streams, an overlay page that shows a count when it changes, and a
+  Counters tab in the panel (`overlay/tab.html`) to set a count right
+  (which fires Counted too) or add a counter. Build its
   `server.wasm` first, from the repo: `cargo plugin examples/plugins/counter`
   (needs `rustup target add wasm32-wasip2`). Only `plugin.json`,
   `server.wasm` and `overlay/` are needed in `plugins/counter`.
@@ -31,3 +34,7 @@ A program can also be a plugin from outside, on the control API:
 a "Fake membership" event node and a "Print" effect node. Run it with
 `node examples/programs/fake-platform.mjs "<connection URL>"` (the URL from
 Status → Control API).
+[examples/programs/chat-regulars.mjs](../programs/chat-regulars.mjs) hears
+the chat and brings a value node (Messages), a flow node (Regulars first)
+and an event node with its own settings on each card (Word said); allow
+it to hear the chat on the Plugins page.

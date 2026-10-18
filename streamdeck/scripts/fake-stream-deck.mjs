@@ -116,8 +116,8 @@ try {
 	check(true, "and its key redrew");
 
 	// The effect, switched in the app (as from the panel): the key follows.
-	await fetch(`${base}/control/effects/rain/toggle?key=${key}`, { method: "POST" });
-	const rainOn = (await state()).effects.find((e) => e.id === "rain").on;
+	await fetch(`${base}/control/plugins/rain/toggle?key=${key}`, { method: "POST" });
+	const rainOn = (await state()).plugins.find((e) => e.id === "rain").on;
 	await until("the effect key follows a change made elsewhere", () => imageOf("k-effect").includes(rainOn ? ">ON<" : ">OFF<"));
 	check(true, "the effect key followed a change made elsewhere");
 
@@ -179,8 +179,8 @@ try {
 	if (now.cards.find((c) => c.id === card.id).on !== card.on) {
 		await fetch(`${base}/control/cards/${encodeURIComponent(card.id)}/toggle?key=${key}`, { method: "POST" });
 	}
-	const rain = before.effects.find((e) => e.id === "rain").on;
-	await fetch(`${base}/control/effects/rain/${rain ? "on" : "off"}?key=${key}`, { method: "POST" });
+	const rain = before.plugins.find((e) => e.id === "rain").on;
+	await fetch(`${base}/control/plugins/rain/${rain ? "on" : "off"}?key=${key}`, { method: "POST" });
 	child.kill();
 	server.close();
 }

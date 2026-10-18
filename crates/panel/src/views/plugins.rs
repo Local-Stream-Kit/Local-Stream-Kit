@@ -23,7 +23,7 @@ use yew::prelude::*;
 use super::activity::use_confirm;
 use super::icon;
 use super::position::PositionPick;
-use super::sounds::{PicturePick, PictureUpload, SoundPick, SoundUpload, chosen_file, file_from, upload};
+use super::sounds::{PicturePick, PictureUpload, SoundPick, SoundUpload, chosen_file, preview_files, upload};
 use crate::editor::fields::{NumberField, PickField};
 use crate::model::{FileDraft, Model};
 use crate::{Panel, util};
@@ -570,12 +570,12 @@ fn PluginBox(props: &PluginBoxProps) -> Html {
             return None;
         }
         // A folder: its first file, so the preview holds still.
-        let mut pick = |kind, folder: &str| {
+        let mut pick = |kind, folder: &str, every| {
             let folders = match kind {
                 MediaKind::Sound => &panel.model.sound_folders,
                 MediaKind::Picture | MediaKind::Media => &panel.model.picture_folders,
             };
-            file_from(&format!("{folder}/"), folders, kind, false)
+            preview_files(folder, folders, kind, every)
         };
         let mut shared = shared_settings(&manifest.settings, stored, &mut pick);
         // A file setting's look as edited here, so the preview follows

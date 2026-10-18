@@ -304,6 +304,9 @@ impl Guest for Obs {
     /// Its event nodes have no settings for it.
     fn nodes_changed(_nodes: Vec<PlacedNode>) {}
 
+    /// It has no tab.
+    fn on_tab(_json: String) {}
+
     fn on_timer(id: u32) {
         let (retry, refresh, held, resized) = STATE.with_borrow_mut(|state| {
             let retry = state.retry == Some(id);

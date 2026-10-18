@@ -3,30 +3,38 @@
 //! One-off web requests (GET or POST) and a WebSocket that stays connected
 //! take the same requests ([`ControlRequest`]). See `docs/control-api.md`.
 //!
-//! Made to grow with plugins: effects are named by string ids that clients
-//! read from [`ControlState`] instead of knowing them, so a plugin's effect
-//! shows up beside the built-ins; clients ignore fields they don't know.
+//! Made to grow with plugins: their switches are named by the plugins'
+//! ids, which clients read from [`ControlState`] instead of knowing them;
+//! clients ignore fields they don't know.
 //!
 //! The WebSocket is also the external connection API: a program registers
 //! as a plugin ([`ControlRequest::Register`]), fires its event nodes
-//! ([`ControlRequest::Emit`]) and is told when its effect nodes fire
-//! ([`ControlMessage::Run`]). See `docs/writing-a-plugin.md` → Programs.
+//! ([`ControlRequest::Emit`]), is told when its effect nodes fire
+//! ([`ControlMessage::Run`]), says where its flow nodes send events
+//! ([`ControlMessage::Route`]) and what its value nodes give
+//! ([`ControlMessage::Compute`]), and hears the chat and events. See
+//! `docs/writing-a-plugin.md` → Programs.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use std::collections::BTreeMap;
 
-use crate::activity::{Moved, QueueAction, QueueGroup, QueueItem, QueueState, Skipped};
+use crate::activity::{ItemOrigin, Moved, QueueAction, QueueGroup, QueueItem, QueueState, Skipped};
 use crate::cards::{Card, NodeKind};
+use crate::chat::ChatLine;
 use crate::config::AppConfig;
 use crate::encode_segment;
-use crate::plugin::Manifest;
-use crate::plugin::{ALERT_PLUGIN, RAIN_PLUGIN, SPEAK_PLUGIN};
-use crate::sound::SOUND_PLUGIN;
+use crate::plugin::{Catalog, Manifest, PluginInfo, RunViewer};
 
-/// Bumped when a change would break existing clients.
-pub const CONTROL_VERSION: u32 = 1;
+/// Bumped when a change would break existing clients: 2 when `effects`
+/// became `plugins` (2026-10-17).
+pub const CONTROL_VERSION: u32 = 2;
+
+/// What a hello without `api` speaks.
+fn first_version() -> u32 {
+    1
+}
 /// `GET` answers the state; the Stream Deck plugin is given this with the
 /// key (see [`connection_url`]).
 pub const CONTROL_PATH: &str = "/control/";
@@ -45,8 +53,9 @@ pub fn card_path(id: &str, set: Switch) -> String {
     format!("/control/cards/{}/{}", encode_segment(id), set.name())
 }
 
-pub fn effect_path(effect: EffectId, set: Switch) -> String {
-    format!("/control/effects/{}/{}", effect.id(), set.name())
+/// Switches a plugin (or the text styles), by its id.
+pub fn plugin_path(id: &str, set: Switch) -> String {
+    format!("/control/plugins/{}/{}", encode_segment(id), set.name())
 }
 
 /// With `only`, a clear takes one group (`?kind=follow`).
@@ -121,68 +130,6 @@ impl Switch {
     }
 }
 
-/// The built-in effects, by their ids on the wire. Plugin effects will
-/// have ids of their own, so clients take the list from the state.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EffectId {
-    Rain,
-    Alert,
-    Sound,
-    Speech,
-}
-
-impl EffectId {
-    pub const ALL: [EffectId; 4] = [EffectId::Rain, EffectId::Alert, EffectId::Sound, EffectId::Speech];
-
-    pub fn id(self) -> &'static str {
-        match self {
-            EffectId::Rain => "rain",
-            EffectId::Alert => "alert",
-            EffectId::Sound => "sound",
-            EffectId::Speech => "speech",
-        }
-    }
-
-    pub fn parse(id: &str) -> Option<EffectId> {
-        EffectId::ALL.into_iter().find(|effect| effect.id() == id)
-    }
-
-    /// As the panel called it on its Effects page (until 2026-10-12).
-    pub fn label(self) -> &'static str {
-        match self {
-            EffectId::Rain => "Emote rain",
-            EffectId::Alert => "Alerts",
-            EffectId::Sound => "Sounds",
-            EffectId::Speech => "Text to speech",
-        }
-    }
-
-    /// The built-in `rain`, `alert`, `sound` and `speak` plugins' switches.
-    /// Text to speech (the Speak plugin's) is every voice read aloud, alerts'
-    /// too (2026-10-14; it was a switch of the app's own until then).
-    pub fn enabled(self, config: &AppConfig) -> bool {
-        match self {
-            EffectId::Rain => config.plugin(RAIN_PLUGIN).enabled,
-            EffectId::Alert => config.plugin(ALERT_PLUGIN).enabled,
-            EffectId::Sound => config.plugin(SOUND_PLUGIN).enabled,
-            EffectId::Speech => config.plugin(SPEAK_PLUGIN).enabled,
-        }
-    }
-
-    pub fn enabled_mut(self, config: &mut AppConfig) -> &mut bool {
-        match self {
-            EffectId::Rain => config.plugin_enabled_mut(RAIN_PLUGIN),
-            EffectId::Alert => config.plugin_enabled_mut(ALERT_PLUGIN),
-            EffectId::Sound => config.plugin_enabled_mut(SOUND_PLUGIN),
-            EffectId::Speech => config.plugin_enabled_mut(SPEAK_PLUGIN),
-        }
-    }
-
-    pub fn state(self, config: &AppConfig) -> EffectState {
-        EffectState { id: self.id().into(), name: self.label().into(), on: self.enabled(config) }
-    }
-}
-
 /// Everything a client shows: answered by `GET /control/state`, and sent
 /// on the WebSocket when it connects and whenever it changes.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -191,7 +138,9 @@ pub struct ControlState {
     pub version: u32,
     /// In the Cards tab's order.
     pub cards: Vec<CardState>,
-    pub effects: Vec<EffectState>,
+    /// Every plugin's switch, as on the Plugins page (see
+    /// [`plugin_states`]).
+    pub plugins: Vec<PluginState>,
     /// The names Custom event nodes listen for, sorted.
     pub events: Vec<String>,
     pub queue: QueueSummary,
@@ -235,11 +184,16 @@ pub struct KindInfo {
 }
 
 impl ControlState {
-    pub fn new(config: &AppConfig, queue: &QueueState, history: HistorySummary) -> ControlState {
+    pub fn new(
+        config: &AppConfig,
+        catalog: &Catalog,
+        queue: &QueueState,
+        history: HistorySummary,
+    ) -> ControlState {
         ControlState {
             version: CONTROL_VERSION,
             cards: config.cards.iter().map(CardState::of).collect(),
-            effects: EffectId::ALL.into_iter().map(|effect| effect.state(config)).collect(),
+            plugins: plugin_states(catalog, config),
             events: custom_events(&config.cards),
             queue: QueueSummary::of(queue),
             kinds: QueueGroup::ALL
@@ -266,11 +220,63 @@ impl CardState {
     }
 }
 
+/// The text styles' switch among the plugins': it's on the Plugins page
+/// like a plugin's. A plugin's id can't have `_`, so none takes it.
+pub const TEXT_STYLES_ID: &str = "text_styles";
+const TEXT_STYLES_NAME: &str = "Text styles";
+
+/// A plugin's switch, or the text styles', as on the Plugins page.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct EffectState {
+pub struct PluginState {
+    /// The plugin's id: `rain`, `speak`; or [`TEXT_STYLES_ID`].
     pub id: String,
+    /// The plugin's name: `Emote rain`, `Speak`.
     pub name: String,
     pub on: bool,
+}
+
+impl PluginState {
+    pub fn of(plugin: &PluginInfo, config: &AppConfig) -> PluginState {
+        let id = &plugin.manifest.id;
+        PluginState { id: id.clone(), name: plugin.manifest.name.clone(), on: config.plugin(id).enabled }
+    }
+
+    fn text_styles(config: &AppConfig) -> PluginState {
+        PluginState {
+            id: TEXT_STYLES_ID.into(),
+            name: TEXT_STYLES_NAME.into(),
+            on: config.text_styles_enabled,
+        }
+    }
+}
+
+/// Every plugin's switch (the built-in ones, the plugins folder's and
+/// programs') and the text styles', by name, as the Plugins page lists
+/// them.
+pub fn plugin_states(catalog: &Catalog, config: &AppConfig) -> Vec<PluginState> {
+    let mut plugins: Vec<PluginState> =
+        catalog.plugins().iter().map(|plugin| PluginState::of(plugin, config)).collect();
+    plugins.push(PluginState::text_styles(config));
+    plugins.sort_by_key(|plugin| plugin.name.to_lowercase());
+    plugins
+}
+
+/// Switches the plugin `id` (or the text styles) in `config`, and answers
+/// its switch; `None` when there's no such plugin.
+pub fn switch_plugin(
+    id: &str,
+    set: Switch,
+    catalog: &Catalog,
+    config: &mut AppConfig,
+) -> Option<PluginState> {
+    if id == TEXT_STYLES_ID {
+        config.text_styles_enabled = set.apply(config.text_styles_enabled);
+        return Some(PluginState::text_styles(config));
+    }
+    let plugin = catalog.plugin(id)?;
+    let enabled = config.plugin_enabled_mut(id);
+    *enabled = set.apply(*enabled);
+    Some(PluginState::of(plugin, config))
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -346,7 +352,7 @@ pub fn custom_events(cards: &[Card]) -> Vec<String> {
 
 /// A request, as a WebSocket message. The web requests are the same ones:
 /// `/control/state`, `/control/cards/{id}/{on|off|toggle}`,
-/// `/control/effects/{id}/{on|off|toggle}`,
+/// `/control/plugins/{id}/{on|off|toggle}`,
 /// `/control/queue/{pause|resume|toggle|skip|clear}` (a clear with
 /// `?kind=follow` takes only follows), `/control/items/{id}/{skip|next}`,
 /// `/control/mute/{on|off|toggle}`, `/control/history/seen` and
@@ -360,7 +366,8 @@ pub enum ControlRequest {
         id: String,
         set: Switch,
     },
-    Effect {
+    /// A plugin's switch (or the text styles'), by id only.
+    Plugin {
         id: String,
         set: Switch,
     },
@@ -408,6 +415,12 @@ pub enum ControlRequest {
     Hello {
         client: String,
         version: String,
+        /// The control API version it speaks (2026-10-17); 1 when left
+        /// out, as programs before then did. A Stream Deck plugin with
+        /// an older one hangs up on seeing the state, and Status offers
+        /// its update.
+        #[serde(default = "first_version")]
+        api: u32,
     },
     /// Makes this connection a plugin: its node types join the cards'
     /// while it's connected, and are remembered after it goes. WebSocket
@@ -419,10 +432,34 @@ pub enum ControlRequest {
     /// output name: a number, a text (emote codes in it become emotes), or
     /// emote codes as a list. WebSocket only. `output` (2026-10-13) fires
     /// another of the node's event outputs than `event` ("ended", say).
+    /// `to` (2026-10-17) fires only that placed copy of it (a
+    /// [`PlacedNode`]'s id), and then `node` may be left out.
     Emit {
+        #[serde(default, skip_serializing_if = "String::is_empty")]
         node: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         output: Option<String>,
+        #[serde(default, skip_serializing_if = "Map::is_empty")]
+        values: Map<String, Value>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        to: Option<String>,
+    },
+    /// The answer to a [`ControlMessage::Route`] (2026-10-17): the event
+    /// goes on from `output` (one of the flow node's event outputs), with
+    /// `values` on its value outputs by name (as a run's values are); with
+    /// no `output`, nowhere. WebSocket only.
+    Routed {
+        run: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        output: Option<String>,
+        #[serde(default, skip_serializing_if = "Map::is_empty")]
+        values: Map<String, Value>,
+    },
+    /// The answer to a [`ControlMessage::Compute`] (2026-10-17): the value
+    /// node's outputs' values by name, as a run's values are; one left out
+    /// gives nothing. WebSocket only.
+    Computed {
+        run: u64,
         #[serde(default, skip_serializing_if = "Map::is_empty")]
         values: Map<String, Value>,
     },
@@ -452,8 +489,8 @@ pub enum ControlMessage {
     Card {
         card: CardState,
     },
-    Effect {
-        effect: EffectState,
+    Plugin {
+        plugin: PluginState,
     },
     Queue {
         queue: QueueSummary,
@@ -511,11 +548,89 @@ pub enum ControlMessage {
         text: String,
         speed: f32,
     },
+    /// Not an answer (2026-10-17): an event came into one of this
+    /// connection's plugin's flow nodes on `input`, and waits there (the
+    /// card doesn't). Answer with [`ControlRequest::Routed`] and the same
+    /// `run`, within an hour. `values` as a run's; `viewer` who set it
+    /// off, none for an event without one.
+    Route {
+        run: u64,
+        node: String,
+        input: String,
+        values: Map<String, Value>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        viewer: Option<RunViewer>,
+        origin: ItemOrigin,
+    },
+    /// Not an answer (2026-10-17): one of its value nodes is needed for an
+    /// event, `values` its inputs and settings as a run's. Answer with
+    /// [`ControlRequest::Computed`] and the same `run` within 10 seconds,
+    /// or it gives nothing.
+    Compute {
+        run: u64,
+        node: String,
+        values: Map<String, Value>,
+        origin: ItemOrigin,
+    },
+    /// Not an answer (2026-10-17): with `"hears": ["chat"]` allowed, a
+    /// chat message, as a page that hears the chat gets it.
+    Chat {
+        line: Box<ChatLine>,
+    },
+    /// A moderator deleted a message (its line's id).
+    ChatRemoved {
+        id: String,
+    },
+    /// A viewer was banned or timed out: their messages go.
+    ChatUserRemoved {
+        platform: String,
+        user_id: String,
+    },
+    /// The chat was cleared (empty `platform`: every platform's).
+    ChatCleared {
+        platform: String,
+    },
+    /// Not an answer (2026-10-17): with `"hears": ["events"]` allowed,
+    /// every event that goes through the cards but chat messages and
+    /// plugins' own: `kind` the built-in event node it's for (`bits`,
+    /// `sub`, `raid`…), `values` what that node's outputs carry, as a
+    /// run's values are.
+    HeardEvent {
+        kind: String,
+        summary: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        viewer: Option<RunViewer>,
+        values: Map<String, Value>,
+        origin: ItemOrigin,
+    },
+    /// Not an answer (2026-10-17): every copy of this connection's
+    /// plugin's event nodes on the cards, right after it registers (with
+    /// event nodes) and whenever they change.
+    Nodes {
+        nodes: Vec<PlacedNode>,
+    },
     /// `status` is what a web request would have answered (401, 404…).
     Error {
         status: u16,
         error: String,
     },
+}
+
+/// One of a program's event nodes placed on a card, as
+/// [`ControlMessage::Nodes`] lists them.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PlacedNode {
+    /// `"<card id>/<node id>"`: what [`ControlRequest::Emit`]'s `to` takes.
+    pub id: String,
+    /// Its node type's id.
+    pub node: String,
+    /// The card's name.
+    pub card: String,
+    /// Whether the card is on.
+    pub on: bool,
+    /// Its settings that aren't filters, as a run's values are (a list,
+    /// `many`, as a text with a line each).
+    pub settings: Map<String, Value>,
 }
 
 #[cfg(test)]
@@ -526,7 +641,8 @@ mod tests {
     fn paths() {
         assert_eq!(card_path("hydrate", Switch::Toggle), "/control/cards/hydrate/toggle");
         assert_eq!(card_path("a b", Switch::On), "/control/cards/a%20b/on");
-        assert_eq!(effect_path(EffectId::Speech, Switch::Off), "/control/effects/speech/off");
+        assert_eq!(plugin_path("speak", Switch::Off), "/control/plugins/speak/off");
+        assert_eq!(plugin_path("my plugin", Switch::On), "/control/plugins/my%20plugin/on");
         assert_eq!(queue_path(QueueAction::Toggle, None), "/control/queue/toggle");
         assert_eq!(
             queue_path(QueueAction::Clear, Some(QueueGroup::Follow)),
@@ -553,9 +669,6 @@ mod tests {
             assert_eq!(serde_json::to_value(action).unwrap(), action.name());
             assert_eq!(QueueAction::parse(action.name()), Some(action));
         }
-        for effect in EffectId::ALL {
-            assert_eq!(EffectId::parse(effect.id()), Some(effect));
-        }
     }
 
     #[test]
@@ -574,18 +687,64 @@ mod tests {
             node.kind = NodeKind::Custom { name: " party ".into() };
         }
         config.cards.push(extra);
-        *config.plugin_enabled_mut(SPEAK_PLUGIN) = false;
-        let state = ControlState::new(&config, &QueueState::default(), HistorySummary { new: 2 });
+        *config.plugin_enabled_mut("speak") = false;
+        let plugin = |id: &str, name: &str| PluginInfo {
+            manifest: Manifest { id: id.into(), name: name.into(), ..Manifest::default() },
+            ..PluginInfo::default()
+        };
+        let plugins = Catalog::new(vec![
+            plugin("speak", "Speak"),
+            plugin("rain", "Emote rain"),
+            plugin("confetti", "confetti"),
+        ]);
+        let state = ControlState::new(&config, &plugins, &QueueState::default(), HistorySummary { new: 2 });
         assert_eq!(state.version, CONTROL_VERSION);
         let ids: Vec<&str> = state.cards.iter().map(|card| card.id.as_str()).collect();
         let expected: Vec<&str> = config.cards.iter().map(|card| card.id.as_str()).collect();
         assert_eq!(ids, expected);
         assert!(state.events.contains(&"party".to_string()));
         assert_eq!(state.events.iter().filter(|name| *name == "party").count(), 1);
-        let speech = state.effects.iter().find(|effect| effect.id == "speech").unwrap();
-        assert!(!speech.on);
-        assert_eq!(state.effects.len(), 4);
+        // Every plugin, by name ignoring case; one without a saved switch is on.
+        let plugins: Vec<(&str, &str, bool)> = state
+            .plugins
+            .iter()
+            .map(|plugin| (plugin.id.as_str(), plugin.name.as_str(), plugin.on))
+            .collect();
+        assert_eq!(
+            plugins,
+            [
+                ("confetti", "confetti", true),
+                ("rain", "Emote rain", true),
+                ("speak", "Speak", false),
+                ("text_styles", "Text styles", true)
+            ]
+        );
         assert_eq!(serde_json::to_value(&state).unwrap()["history"], serde_json::json!({ "new": 2 }));
+    }
+
+    #[test]
+    fn plugins_and_the_text_styles_switch() {
+        let mut config = AppConfig::default();
+        let rain = PluginInfo {
+            manifest: Manifest { id: "rain".into(), name: "Emote rain".into(), ..Manifest::default() },
+            ..PluginInfo::default()
+        };
+        let catalog = Catalog::new(vec![rain]);
+        let switched = switch_plugin("rain", Switch::Toggle, &catalog, &mut config).unwrap();
+        assert_eq!((switched.name.as_str(), switched.on), ("Emote rain", false));
+        assert!(!config.plugin("rain").enabled);
+        let switched = switch_plugin(TEXT_STYLES_ID, Switch::Off, &catalog, &mut config).unwrap();
+        assert_eq!((switched.name.as_str(), switched.on), ("Text styles", false));
+        assert!(!config.text_styles_enabled);
+        let before = config.clone();
+        assert_eq!(switch_plugin("speech", Switch::On, &catalog, &mut config), None);
+        assert_eq!(switch_plugin("Rain", Switch::On, &catalog, &mut config), None, "by id only");
+        assert_eq!(config, before);
+        let request: ControlRequest =
+            serde_json::from_str(r#"{"type":"plugin","id":"rain","set":"off"}"#).unwrap();
+        assert_eq!(request, ControlRequest::Plugin { id: "rain".into(), set: Switch::Off });
+        let answer = ControlMessage::Plugin { plugin: switched };
+        assert_eq!(serde_json::to_value(&answer).unwrap()["plugin"]["id"], "text_styles");
     }
 
     #[test]
@@ -619,7 +778,15 @@ mod tests {
         assert_eq!(request, ControlRequest::HistorySeen);
         let request: ControlRequest =
             serde_json::from_str(r#"{"type":"hello","client":"streamdeck","version":"0.1.1.0"}"#).unwrap();
-        assert_eq!(request, ControlRequest::Hello { client: "streamdeck".into(), version: "0.1.1.0".into() });
+        assert_eq!(
+            request,
+            ControlRequest::Hello { client: "streamdeck".into(), version: "0.1.1.0".into(), api: 1 },
+            "from before hellos said their API version"
+        );
+        let request: ControlRequest =
+            serde_json::from_str(r#"{"type":"hello","client":"streamdeck","version":"0.3.0.0","api":2}"#)
+                .unwrap();
+        assert!(matches!(request, ControlRequest::Hello { api: 2, .. }));
         assert_eq!(
             serde_json::to_value(ControlMessage::Hello { version: "0.1.1".into() }).unwrap(),
             serde_json::json!({ "type": "hello", "version": "0.1.1" })
@@ -689,12 +856,62 @@ mod tests {
         assert!(matches!(request, ControlRequest::Register { plugin } if plugin.id == "billybilly"));
         let request: ControlRequest =
             serde_json::from_str(r#"{"type":"emit","node":"membership","values":{"months":3}}"#).unwrap();
-        let ControlRequest::Emit { node, values, output } = request else { panic!() };
+        let ControlRequest::Emit { node, values, output, to } = request else { panic!() };
         assert_eq!((node.as_str(), &values["months"]), ("membership", &serde_json::json!(3)));
-        assert_eq!(output, None);
+        assert_eq!((output, to), (None, None));
         let request: ControlRequest =
             serde_json::from_str(r#"{"type":"emit","node":"played","output":"ended"}"#).unwrap();
         assert!(matches!(request, ControlRequest::Emit { output: Some(output), .. } if output == "ended"));
+        // One placed copy, without naming its node.
+        let request: ControlRequest = serde_json::from_str(r#"{"type":"emit","to":"wow/3"}"#).unwrap();
+        assert!(
+            matches!(&request, ControlRequest::Emit { node, to: Some(to), .. } if node.is_empty() && to == "wow/3")
+        );
+
+        // Flow and value nodes' answers.
+        let request: ControlRequest =
+            serde_json::from_str(r#"{"type":"routed","run":7,"output":"regular","values":{"count":4}}"#)
+                .unwrap();
+        assert!(
+            matches!(&request, ControlRequest::Routed { run: 7, output: Some(output), values } if output == "regular" && values["count"] == 4)
+        );
+        let request: ControlRequest = serde_json::from_str(r#"{"type":"routed","run":7}"#).unwrap();
+        assert_eq!(request, ControlRequest::Routed { run: 7, output: None, values: Map::new() }, "nowhere");
+        let request: ControlRequest =
+            serde_json::from_str(r#"{"type":"computed","run":8,"values":{"messages":12}}"#).unwrap();
+        assert!(matches!(&request, ControlRequest::Computed { run: 8, values } if values["messages"] == 12));
+        let route = ControlMessage::Route {
+            run: 7,
+            node: "regulars".into(),
+            input: "event".into(),
+            values: Map::new(),
+            viewer: None,
+            origin: ItemOrigin::Test,
+        };
+        assert_eq!(
+            serde_json::to_value(&route).unwrap(),
+            serde_json::json!({ "type": "route", "run": 7, "node": "regulars", "input": "event", "values": {}, "origin": "test" })
+        );
+        let nodes = ControlMessage::Nodes {
+            nodes: vec![PlacedNode {
+                id: "wow/3".into(),
+                node: "said".into(),
+                card: "WoW".into(),
+                on: true,
+                settings: serde_json::json!({ "times": 3 }).as_object().unwrap().clone(),
+            }],
+        };
+        assert_eq!(
+            serde_json::to_value(&nodes).unwrap(),
+            serde_json::json!({ "type": "nodes", "nodes": [
+                { "id": "wow/3", "node": "said", "card": "WoW", "on": true, "settings": { "times": 3 } }
+            ] })
+        );
+        let heard = ControlMessage::ChatCleared { platform: String::new() };
+        assert_eq!(
+            serde_json::to_value(&heard).unwrap(),
+            serde_json::json!({ "type": "chat_cleared", "platform": "" })
+        );
         let run = ControlMessage::Run {
             node: "burst".into(),
             input: "trigger".into(),

@@ -1,8 +1,8 @@
 {
 	"Name": "Local Stream Kit",
-	"Version": "0.2.0.0",
+	"Version": "0.3.0.0",
 	"Author": "Local Stream Kit",
-	"Description": "Switch Local Stream Kit's cards and effects, run its alert queue, fire Custom events and mark its history seen, with keys that show what's on.",
+	"Description": "Switch Local Stream Kit's cards and plugins, run its alert queue, fire Custom events and mark its history seen, with keys that show what's on.",
 	"Category": "Local Stream Kit",
 	"CategoryIcon": "imgs/category",
 	"Icon": "imgs/plugin",
@@ -43,10 +43,10 @@
 			]
 		},
 		{
-			"Name": "Effect on / off",
+			"Name": "Plugin on / off",
 			"UUID": "com.localstreamkit.streamdeck.effect",
 			"Icon": "imgs/actions/effect",
-			"Tooltip": "Turns an effect (emote rain, alerts, sounds, text to speech) on or off.",
+			"Tooltip": "Turns a plugin on or off, and shows whether it's on.",
 			"Controllers": [
 				"Keypad"
 			],

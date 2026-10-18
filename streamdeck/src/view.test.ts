@@ -7,12 +7,12 @@ import { type ControlState, hello } from "./protocol.js";
 import { cardView, effectView, eventView, historyView, muteView, queueView } from "./view.js";
 
 const state: ControlState = {
-	version: 1,
+	version: 2,
 	cards: [
 		{ id: "hydrate", name: "Hydrate", on: true },
 		{ id: "party", name: "Party", on: false },
 	],
-	effects: [{ id: "rain", name: "Emote rain", on: true }],
+	plugins: [{ id: "rain", name: "Emote rain", on: true }],
 	events: ["party"],
 	queue: { paused: false, playing: true, waiting: 2, by_kind: { follow: 2 }, players: 1 },
 	kinds: [
@@ -35,7 +35,7 @@ test("the address pasted from the panel", () => {
 });
 
 test("the hello says the plugin's version", () => {
-	assert.deepEqual(JSON.parse(hello("0.1.1.0")), { type: "hello", client: "streamdeck", version: "0.1.1.0" });
+	assert.deepEqual(JSON.parse(hello("0.3.0.0")), { type: "hello", client: "streamdeck", version: "0.3.0.0", api: 2 });
 });
 
 test("a card key shows whether the card is on, by id", () => {
@@ -51,11 +51,13 @@ test("a card key shows whether the card is on, by id", () => {
 		title: "Hydrate",
 	});
 	assert.equal(cardView({ card: "hydrate" }, undefined, "wrong-key").label, "WRONG KEY");
+	assert.equal(cardView({ card: "hydrate" }, undefined, "too-old").label, "UPDATE APP");
 });
 
-test("effect, queue and event keys", () => {
+test("plugin, queue and event keys", () => {
 	assert.deepEqual(effectView({ effect: "rain" }, state, "connected"), { look: "on", label: "ON", title: "Emote rain" });
 	assert.equal(effectView({ effect: "confetti", name: "Confetti" }, state, "connected").look, "missing");
+	assert.equal(effectView({}, state, "connected").title, "Pick a plugin");
 	assert.deepEqual(queueView({}, state, "connected"), { look: "on", label: "PLAYING", title: "Queue" });
 	const paused = { ...state, queue: { ...state.queue, paused: true } };
 	assert.deepEqual(queueView({ action: "pause" }, paused, "connected"), { look: "paused", label: "PAUSED", title: "Pause" });

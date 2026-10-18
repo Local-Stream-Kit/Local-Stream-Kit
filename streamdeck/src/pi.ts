@@ -87,6 +87,7 @@ const STATUS: Record<ToSettingsPage["connection"], string> = {
 	"wrong-key": "Wrong key",
 	unreachable: "Not running?",
 	"too-new": "Update the plugin",
+	"too-old": "Update Local Stream Kit",
 };
 
 function render(): void {
@@ -168,11 +169,11 @@ function renderFields(): void {
 		}
 		case "effect": {
 			const effect = settings as EffectSettings;
-			const effects = (view?.effects ?? []).map((e) => ({ value: e.id, label: e.on ? e.name : `${e.name} (off)` }));
+			const plugins = (view?.plugins ?? []).map((e) => ({ value: e.id, label: e.on ? e.name : `${e.name} (off)` }));
 			const missing = offline ? (effect.name ?? effect.effect ?? "") : `${effect.name ?? effect.effect} (gone)`;
 			fields.append(
-				dropdown("Effect", effects, effect.effect, missing, (id) => {
-					save({ effect: id, name: view?.effects.find((e) => e.id === id)?.name } as EffectSettings);
+				dropdown("Plugin", plugins, effect.effect, missing, (id) => {
+					save({ effect: id, name: view?.plugins.find((p) => p.id === id)?.name } as EffectSettings);
 				}),
 				dropdown("When pressed", switches, effect.set ?? "toggle", "", (set) => save({ set } as EffectSettings)),
 			);

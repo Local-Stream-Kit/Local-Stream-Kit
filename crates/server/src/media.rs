@@ -257,24 +257,43 @@ impl MediaFolders {
     /// `kind` takes, at random, as `"alerts/hype.gif"`; `None` for an empty
     /// or missing folder.
     pub fn pick(&self, kind: MediaKind, folder: &str, rng: &mut dyn RandomSource) -> Option<String> {
+        let files = self.files(kind, folder);
+        (!files.is_empty()).then(|| files[rng.index(files.len())].clone())
+    }
+
+    /// Every file in `folder` that `kind` takes, in name order, as
+    /// `"alerts/hype.gif"`.
+    pub fn files(&self, kind: MediaKind, folder: &str) -> Vec<String> {
         let media = match kind {
             MediaKind::Picture | MediaKind::Media => &PICTURES,
             MediaKind::Sound => &SOUNDS,
         };
         if !is_folder_name(folder) {
-            return None;
+            return Vec::new();
         }
-        let files: Vec<String> = media
+        media
             .list(&(media.folder)(self).join(folder))
             .into_iter()
             .filter(|file| kind.takes(file))
-            .collect();
-        (!files.is_empty()).then(|| format!("{folder}/{}", files[rng.index(files.len())]))
+            .map(|file| format!("{folder}/{file}"))
+            .collect()
     }
 
-    /// [`pick`](Self::pick), outside the pipeline.
-    pub fn pick_any(&self, kind: MediaKind, folder: &str) -> Option<String> {
-        self.pick(kind, folder, &mut crate::pipeline::StdRandom::new())
+    /// Files for a setting naming `folder` (`protocol::plugin::PickFile`):
+    /// one at random, or with `every` all of them.
+    pub fn pick_files(
+        &self,
+        kind: MediaKind,
+        folder: &str,
+        every: bool,
+        rng: &mut dyn RandomSource,
+    ) -> Vec<String> {
+        if every { self.files(kind, folder) } else { self.pick(kind, folder, rng).into_iter().collect() }
+    }
+
+    /// [`pick_files`](Self::pick_files), outside the pipeline.
+    pub fn pick_files_any(&self, kind: MediaKind, folder: &str, every: bool) -> Vec<String> {
+        self.pick_files(kind, folder, every, &mut crate::pipeline::StdRandom::new())
     }
 }
 
@@ -400,6 +419,11 @@ mod tests {
         assert_eq!(folders.pick(MediaKind::Sound, "Empty", &mut rng), None);
         assert_eq!(folders.pick(MediaKind::Picture, "missing", &mut rng), None);
         assert_eq!(folders.pick(MediaKind::Picture, "..", &mut rng), None);
+        assert_eq!(
+            folders.pick_files(MediaKind::Picture, "alerts", true, &mut rng),
+            ["alerts/a.gif", "alerts/b.png"]
+        );
+        assert_eq!(folders.pick_files(MediaKind::Picture, "missing", true, &mut rng), Vec::<String>::new());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

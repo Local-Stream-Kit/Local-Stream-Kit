@@ -6,8 +6,8 @@
 //! Each plugin runs on a thread of its own and is called with one thing at
 //! a time ([`Call`]): `start`, its effect nodes' runs, what cards ask its
 //! flow and value nodes, the chat and events it hears, its event nodes on
-//! the cards, timers, web answers, socket messages, and messages to read
-//! aloud in its voices. The app does every bit of waiting (timers, web
+//! the cards, what its tab in the panel sends, timers, web answers, socket
+//! messages, and messages to read aloud in its voices. The app does every bit of waiting (timers, web
 //! requests, sockets) on its own tasks and hands the results back as calls,
 //! so a plugin never blocks and needs no async.
 //!
@@ -27,7 +27,7 @@ use std::time::Duration;
 use protocol::cards::{Category, SocketType};
 use protocol::config::AppConfig;
 use protocol::plugin::{EmoteValue, PluginCommand, PluginInfo, PluginMessage, TextPart, TextValue};
-use protocol::plugin::{NodeType, Setting, shared_settings};
+use protocol::plugin::{Manifest, NodeType, Setting, shared_settings};
 use protocol::{Command, Envelope};
 use serde_json::{Map, Value as Json};
 use tokio::runtime::Handle;
@@ -42,7 +42,7 @@ use super::net::{MAX_BODY, Net};
 use crate::emote_text::EmoteText;
 use crate::model::{ChannelRef, EmoteRef, Input, InputKind, Origin, PlatformEvent, PostedEmote};
 use crate::pipeline::now_ms;
-use crate::services::activity::{Activity, Asked, Asks, Heard};
+use crate::services::activity::{Activity, Asked, Asks, Heard, Pending};
 use crate::services::overlay_hub::OverlayHub;
 use crate::services::speech::{self, MAX_AUDIO, Speech};
 use crate::services::status::StatusHub;
@@ -76,9 +76,6 @@ const MAX_SOCKETS: usize = 8;
 const FETCH_TIMEOUT: Duration = Duration::from_secs(30);
 /// Everything a plugin stores, together.
 const MAX_STORED: usize = 1024 * 1024;
-/// Flow nodes' runs it said it answers later (`route-later`), at most, and
-/// value nodes' (`compute-later`).
-const MAX_LATER: usize = 1000;
 
 /// What a plugin's server code needs from the app.
 #[derive(Clone)]
@@ -106,6 +103,8 @@ pub struct Deps {
     pub activity: crate::services::activity::Activity,
     /// For settings that name a folder of pictures or sounds.
     pub media: crate::media::MediaFolders,
+    /// What plugins' tabs in the panel send their code, and back.
+    pub tabs: super::tabs::PluginTabs,
 }
 
 /// Runs the server code of every plugin that's on and whose hosts are
@@ -172,23 +171,24 @@ struct Started {
     placed: Vec<Placed>,
 }
 
-/// One of a plugin's event nodes placed on a card (`placed-node`).
+/// One of a plugin's event nodes placed on a card (`placed-node`, a
+/// program's `nodes`).
 #[derive(Debug, Clone, PartialEq)]
-struct Placed {
+pub(crate) struct Placed {
     /// `"<card id>/<node id>"`.
-    id: String,
+    pub id: String,
     /// Its node type's id.
-    node: String,
+    pub node: String,
     /// The card's name.
-    card: String,
-    on: bool,
+    pub card: String,
+    pub on: bool,
     /// Its settings that aren't filters, as stored (every one with a
     /// value).
     settings: Map<String, Json>,
 }
 
-/// `info`'s event nodes on the cards in `config`.
-fn placed_nodes(info: &PluginInfo, config: &AppConfig) -> Vec<Placed> {
+/// `manifest`'s event nodes on the cards in `config`.
+pub(crate) fn placed_nodes(manifest: &Manifest, config: &AppConfig) -> Vec<Placed> {
     let mut placed = Vec::new();
     for card in &config.cards {
         for node in &card.nodes {
@@ -196,8 +196,8 @@ fn placed_nodes(info: &PluginInfo, config: &AppConfig) -> Vec<Placed> {
                 continue;
             };
             let found =
-                info.manifest.nodes.iter().find(|each| each.id == *ty && each.category == Category::Events);
-            let Some(ty) = found.filter(|_| *plugin == info.manifest.id) else { continue };
+                manifest.nodes.iter().find(|each| each.id == *ty && each.category == Category::Events);
+            let Some(ty) = found.filter(|_| *plugin == manifest.id) else { continue };
             placed.push(Placed {
                 id: crate::cards::placed_id(&card.id, node.id),
                 node: ty.id.clone(),
@@ -213,6 +213,37 @@ fn placed_nodes(info: &PluginInfo, config: &AppConfig) -> Vec<Placed> {
         }
     }
     placed
+}
+
+/// A placed event node's settings as its plugin gets them (`ty` its node
+/// type): as an effect node's run has them (a text as a text, a
+/// picture's or sound's path, one from a folder picked now), a list
+/// (`many`) as a text with a line each.
+pub(crate) fn placed_settings(
+    ty: Option<&NodeType>,
+    placed: &Placed,
+    media: &crate::media::MediaFolders,
+) -> Map<String, Json> {
+    placed
+        .settings
+        .iter()
+        .filter_map(|(key, stored)| {
+            let setting = ty?.setting(key)?;
+            let json = match (&setting.kind, stored) {
+                (protocol::plugin::SettingKind::Text { .. }, Json::Array(list)) => {
+                    let lines: Vec<&str> = list.iter().filter_map(Json::as_str).collect();
+                    super::text_value(&EmoteText::plain_text(lines.join("\n")))
+                }
+                (protocol::plugin::SettingKind::Text { .. }, Json::String(text)) => {
+                    super::text_value(&EmoteText::plain_text(text.clone()))
+                }
+                _ => protocol::plugin::shared_value(setting, Some(stored), &mut |kind, folder, every| {
+                    media.pick_files_any(kind, folder, every)
+                }),
+            };
+            Some((key.clone(), json))
+        })
+        .collect()
 }
 
 /// What `host.settings` is made from for plugin `id`, as stored: its
@@ -252,7 +283,7 @@ fn follow(
         let wanted = settings.enabled && allowed;
         let fingerprint = plugins.fingerprint(&id);
         let settings = own_settings(deps, config, &id);
-        let placed = placed_nodes(&info, config);
+        let placed = placed_nodes(&info.manifest, config);
         if wanted
             && let Some(started) = running.get_mut(&id).filter(|started| started.fingerprint == fingerprint)
         {
@@ -279,7 +310,8 @@ fn follow(
         // Here, not on its thread, so copies take over what cards ask in
         // the order they start (one that's stopping never takes it back).
         let (asks, asked) = deps.activity.asks(&id);
-        let listening = Listening { commands: deps.hub.subscribe(), asks, asked };
+        let listening =
+            Listening { commands: deps.hub.subscribe(), tab: deps.tabs.code_listens(), asks, asked };
         // Told its placed nodes right after it starts.
         let _ = calls.send(Call::NodesChanged(placed.clone()));
         let (engine, plugins, deps, own) = (engine.clone(), Arc::clone(plugins), deps.clone(), calls.clone());
@@ -322,6 +354,8 @@ enum Call {
     /// Its event nodes placed on cards, all of them, after a change (and
     /// once at the start).
     NodesChanged(Vec<Placed>),
+    /// A message from its tab in the panel, as JSON.
+    Tab(String),
 }
 
 /// What a plugin's server code listens to from the moment [`follow`]
@@ -329,6 +363,8 @@ enum Call {
 struct Listening {
     /// The overlay hub: its effect nodes' runs.
     commands: broadcast::Receiver<Arc<Envelope>>,
+    /// What tabs in the panel send (its own and other plugins').
+    tab: broadcast::Receiver<Arc<super::tabs::TabMessage>>,
     /// What cards ask it.
     asks: Asks,
     asked: mpsc::UnboundedReceiver<Asked>,
@@ -344,7 +380,7 @@ fn run_plugin(
     mut inbox: mpsc::UnboundedReceiver<Call>,
 ) {
     let id = info.manifest.id.clone();
-    let Listening { mut commands, asks, asked } = listening;
+    let Listening { mut commands, tab, asks, asked } = listening;
     let asking = forward_asks(&deps.runtime, asked, calls.clone());
     let mut running = match Running::new(engine, &info, plugins, &deps, calls.clone()) {
         Ok(running) => running,
@@ -368,6 +404,7 @@ fn run_plugin(
         });
         (speaker, task)
     });
+    let from_tab = forward_tab(&deps.runtime, tab, &id, calls.clone());
     // Its effect nodes' runs, from the overlay hub (the overlays leave them
     // to the server code).
     let forward = {
@@ -408,6 +445,7 @@ fn run_plugin(
         Ok(())
     });
     forward.abort();
+    from_tab.abort();
     let_go(&deps.activity, &deps.runtime, &id, asks, asking, &mut inbox);
     drop(serving);
     if let Some((speaker, task)) = speaker {
@@ -420,6 +458,36 @@ fn run_plugin(
     if let Err(reason) = result {
         plugins.stop(&id, reason);
     }
+}
+
+/// Passes what plugin `id`'s tab sends on to its calls, as JSON text.
+fn forward_tab(
+    runtime: &Handle,
+    mut tab: broadcast::Receiver<Arc<super::tabs::TabMessage>>,
+    id: &str,
+    calls: mpsc::UnboundedSender<Call>,
+) -> tokio::task::JoinHandle<()> {
+    let id = id.to_string();
+    runtime.spawn(async move {
+        loop {
+            match tab.recv().await {
+                Ok(message) if message.plugin == id => {
+                    if calls.send(Call::Tab(message.data.to_string())).is_err() {
+                        break;
+                    }
+                }
+                Ok(_) => {}
+                Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                    tracing::warn!(
+                        plugin = id,
+                        skipped,
+                        "the plugin fell behind; some of its tab's messages were skipped"
+                    );
+                }
+                Err(broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    })
 }
 
 /// Passes what cards ask a plugin's server code on to its calls, until
@@ -624,6 +692,7 @@ impl Running {
                 self.call(|plugin, store| plugin.call_nodes_changed(store, &nodes))
             }
             Call::Skip(queue_id) => self.call(|plugin, store| plugin.call_skip(store, queue_id)),
+            Call::Tab(json) => self.call(|plugin, store| plugin.call_on_tab(store, &json)),
             Call::SettingsChanged => self.call(|plugin, store| plugin.call_settings_changed(store)),
             Call::Timer(id) => {
                 // A one-off timer is done once it fires.
@@ -719,6 +788,16 @@ fn outputs_of(ty: &NodeType, values: Vec<NamedValue>) -> Vec<(String, crate::car
             Some((name, card_value(value)?.into_type(output.ty)?))
         })
         .collect()
+}
+
+/// What a program gave a flow or value node's outputs (as a run's values
+/// are: a number, `true` or `false`, a plain string, a text, emotes), as
+/// they carry it ([`outputs_of`]).
+pub(crate) fn outputs_of_json(
+    ty: &NodeType,
+    values: &Map<String, Json>,
+) -> Vec<(String, crate::cards::Value)> {
+    outputs_of(ty, named_values(values))
 }
 
 /// An effect or flow node's values, as the plugin gets them.
@@ -832,35 +911,6 @@ struct Timer {
     repeat: bool,
 }
 
-/// Runs it said it answers later (`route-later`, `compute-later`), with
-/// their node, oldest first: at most [`MAX_LATER`], the oldest forgotten.
-#[derive(Default)]
-struct Later(BTreeMap<u64, String>);
-
-impl Later {
-    fn park(&mut self, run: u64, node: &str) {
-        self.0.insert(run, node.to_string());
-        while self.0.len() > MAX_LATER {
-            self.0.pop_first();
-        }
-    }
-
-    /// Run `run`'s node, if it waits.
-    fn node(&self, run: u64) -> Option<&str> {
-        self.0.get(&run).map(String::as_str)
-    }
-
-    /// Run `run`'s node, if it waits; it no longer does.
-    fn take(&mut self, run: u64) -> Option<String> {
-        self.0.remove(&run)
-    }
-
-    /// Every run waiting; none from now.
-    fn drain(&mut self) -> impl Iterator<Item = u64> + use<> {
-        std::mem::take(&mut self.0).into_keys()
-    }
-}
-
 /// The plugin's side of the app: what its imports reach.
 struct State {
     id: String,
@@ -872,10 +922,10 @@ struct State {
     flows: Vec<NodeType>,
     /// Its value nodes.
     values: Vec<NodeType>,
-    /// Flow nodes' runs it answers later.
-    later: Later,
-    /// Value nodes' runs it answers later.
-    later_values: Later,
+    /// Flow nodes' runs it answers later (`route-later`).
+    later: Pending,
+    /// Value nodes' runs it answers later (`compute-later`).
+    later_values: Pending,
     /// Its event nodes placed on cards, which `emit-to` may fire: their
     /// node type, by placed id.
     placed: HashMap<String, String>,
@@ -883,6 +933,8 @@ struct State {
     plugins: Arc<Plugins>,
     /// Its plugin-wide settings, as the manifest declares them.
     settings: Vec<Setting>,
+    /// Its tab has a number on it (its manifest's `tab.count`).
+    tab_counts: bool,
     deps: Deps,
     calls: mpsc::UnboundedSender<Call>,
     wasi: WasiCtx,
@@ -951,10 +1003,11 @@ impl State {
                 .filter(|node| node.category == Category::Values)
                 .cloned()
                 .collect(),
-            later: Later::default(),
-            later_values: Later::default(),
+            later: Pending::default(),
+            later_values: Pending::default(),
             placed: HashMap::new(),
             settings: info.manifest.settings.clone(),
+            tab_counts: info.manifest.tab.as_ref().is_some_and(|tab| tab.count),
             plugins,
             id,
             deps: deps.clone(),
@@ -1075,39 +1128,15 @@ impl State {
         }
     }
 
-    /// A placed event node as the plugin gets it: its settings as an
-    /// effect node's run has them (a text as a text, a picture's or
-    /// sound's path, one from a folder picked now), a list (`many`) as a
-    /// text with a line each.
+    /// A placed event node as the plugin gets it ([`placed_settings`]).
     fn placed_node(&self, placed: &Placed) -> PlacedNode {
         let ty = self.events.iter().find(|ty| ty.id == placed.node);
-        let media = &self.deps.media;
-        let settings = placed
-            .settings
-            .iter()
-            .filter_map(|(key, stored)| {
-                let setting = ty?.setting(key)?;
-                let json = match (&setting.kind, stored) {
-                    (protocol::plugin::SettingKind::Text { .. }, Json::Array(list)) => {
-                        let lines: Vec<&str> = list.iter().filter_map(Json::as_str).collect();
-                        super::text_value(&EmoteText::plain_text(lines.join("\n")))
-                    }
-                    (protocol::plugin::SettingKind::Text { .. }, Json::String(text)) => {
-                        super::text_value(&EmoteText::plain_text(text.clone()))
-                    }
-                    _ => protocol::plugin::shared_value(setting, Some(stored), &mut |kind, folder| {
-                        media.pick_any(kind, folder)
-                    }),
-                };
-                Some(NamedValue { name: key.clone(), value: value_of(&json) })
-            })
-            .collect();
         PlacedNode {
             id: placed.id.clone(),
             node: placed.node.clone(),
             card: placed.card.clone(),
             on: placed.on,
-            settings,
+            settings: named_values(&placed_settings(ty, placed, &self.deps.media)),
         }
     }
 
@@ -1330,9 +1359,10 @@ impl lsk::plugin::host::Host for State {
         let config = self.deps.config.borrow().clone();
         let media = &self.deps.media;
         let stored = config.plugin(&self.id);
-        let mut settings = shared_settings(&self.settings, stored.shared_settings(), &mut |kind, folder| {
-            media.pick_any(kind, folder)
-        });
+        let mut settings =
+            shared_settings(&self.settings, stored.shared_settings(), &mut |kind, folder, every| {
+                media.pick_files_any(kind, folder, every)
+            });
         settings.extend(self.deps.files.values(&self.id, stored.shared_settings()));
         settings.extend(self.deps.secrets.values(&self.id));
         settings
@@ -1343,6 +1373,21 @@ impl lsk::plugin::host::Host for State {
 
     fn set_status(&mut self, level: StatusLevel, text: String) {
         self.plugins.set_status(&self.id, protocol::plugin::PluginStatus::new(status_level(level), &text));
+    }
+
+    fn send_to_tab(&mut self, json: String) {
+        match serde_json::from_str::<Json>(&json) {
+            Ok(data) => self.deps.tabs.to_panels(&self.id, data),
+            Err(error) => tracing::warn!(plugin = self.id, "send-to-tab: not JSON ({error})"),
+        }
+    }
+
+    fn set_tab_count(&mut self, count: u32) {
+        if self.tab_counts {
+            self.plugins.set_tab_count(&self.id, count);
+        } else {
+            tracing::warn!(plugin = self.id, "set-tab-count: its manifest's tab has no \"count\": true");
+        }
     }
 
     fn set_note(&mut self, setting: String, level: StatusLevel, lines: Vec<String>) {
@@ -1598,7 +1643,7 @@ mod tests {
             ],
             ..Default::default()
         };
-        let placed = placed_nodes(&info, &config);
+        let placed = placed_nodes(&info.manifest, &config);
         assert_eq!(placed.len(), 2, "not another plugin's node");
         assert_eq!((placed[0].id.as_str(), placed[0].card.as_str(), placed[0].on), ("a/1", "A", true));
         assert_eq!(
@@ -1611,9 +1656,9 @@ mod tests {
 
         // Editing another plugin's card changes nothing for this one.
         config.cards[2].nodes.push(node(2, "someone-else", serde_json::json!({})));
-        assert_eq!(placed_nodes(&info, &config), placed);
+        assert_eq!(placed_nodes(&info.manifest, &config), placed);
         config.cards[1].enabled = true;
-        assert_ne!(placed_nodes(&info, &config), placed, "its card switched on");
+        assert_ne!(placed_nodes(&info.manifest, &config), placed, "its card switched on");
     }
 
     /// A WebSocket server on a free local port that sends `first`, then

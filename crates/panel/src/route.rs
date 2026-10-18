@@ -18,6 +18,8 @@ pub enum Route {
     Plugins,
     /// The plugins, scrolled to this one's box.
     Plugin(String),
+    /// A plugin's own tab (its manifest's `tab`), by the plugin's id.
+    Tab(String),
 }
 
 impl Route {
@@ -26,6 +28,7 @@ impl Route {
         match path.split_once('/') {
             Some(("card", id)) if !id.is_empty() => Route::Card(decode(id)),
             Some(("plugins", id)) if !id.is_empty() => Route::Plugin(decode(id)),
+            Some(("tab", id)) if !id.is_empty() => Route::Tab(decode(id)),
             _ => match path {
                 "new" => Route::NewCard,
                 "activity" => Route::Activity,
@@ -53,6 +56,7 @@ impl Route {
             Route::Control => "#/control".into(),
             Route::Plugins => "#/plugins".into(),
             Route::Plugin(id) => format!("#/plugins/{}", encode(id)),
+            Route::Tab(id) => format!("#/tab/{}", encode(id)),
         }
     }
 
@@ -97,5 +101,6 @@ mod tests {
         assert_eq!(Route::parse(""), Route::Cards);
         assert_eq!(Route::parse("#/effects"), Route::Plugins);
         assert_eq!(Route::parse("#/card/"), Route::Cards);
+        assert_eq!(Route::parse("#/tab/"), Route::Cards);
     }
 }

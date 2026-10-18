@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Checks</title>
+  <link rel="stylesheet" href="/plugin-tab.css">
+</head>
+<body>
+  <p id="heard">Nothing yet.</p>
+  <script>
+    // For the e2e tests: send(3) gives the server code a number, which it
+    // puts on the tab and sends back; what comes back shows in #heard.
+    window.send = (data) => window.parent.postMessage({ type: "send", data }, "*");
+    addEventListener("message", (event) => {
+      if (event.source !== window.parent || event.data?.type !== "message") return;
+      document.getElementById("heard").textContent = JSON.stringify(event.data.data);
+    });
+  </script>
+</body>
+</html>

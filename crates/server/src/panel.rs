@@ -80,6 +80,8 @@ pub struct PanelState {
     pub secrets: crate::plugins::secrets::PluginSecrets,
     /// The lists of choices plugins' server code filled in.
     pub options: crate::plugins::options::PluginOptions,
+    /// What plugins' tabs send their server code, and back.
+    pub tabs: crate::plugins::tabs::PluginTabs,
     /// For previews that don't wait in the queue.
     pub hub: OverlayHub,
     pub log: crate::logging::Logging,
@@ -247,6 +249,7 @@ async fn connection(socket: WebSocket, panel: PanelState) {
     let mut speech_previews = panel.speech_previews.subscribe();
     speech_previews.mark_changed();
     let mut chat_changes = panel.chat_log.subscribe();
+    let mut tab_messages = panel.tabs.panel_listens();
     // Answers about viewers, which wait on the disk or on Twitch; and the
     // card this panel has open.
     let (replies, mut answers) = mpsc::channel::<PanelEvent>(32);
@@ -411,6 +414,17 @@ async fn connection(socket: WebSocket, panel: PanelState) {
                 if let Some(event) = event
                     && send(&mut sender, &event).await.is_err()
                 {
+                    break;
+                }
+            }
+            message = tab_messages.recv() => {
+                let event = match message {
+                    Ok(message) => PanelEvent::TabMessage { plugin: message.plugin.clone(), data: message.data.clone() },
+                    // Messages missed: the tab asks again when it's opened.
+                    Err(RecvError::Lagged(_)) => continue,
+                    Err(RecvError::Closed) => break,
+                };
+                if send(&mut sender, &event).await.is_err() {
                     break;
                 }
             }
@@ -774,6 +788,15 @@ async fn handle(request: PanelRequest, panel: &PanelState) -> Option<PanelEvent>
         | PanelRequest::CloseViewer
         | PanelRequest::Moderate { .. }
         | PanelRequest::OpenTwitchCard { .. } => None,
+        PanelRequest::TabMessage { plugin, data } => {
+            let size = data.to_string().len();
+            if size > protocol::plugin::TAB_MESSAGE_LIMIT {
+                tracing::warn!(plugin, size, "a tab's message was too big for its server code; dropped");
+            } else {
+                panel.tabs.to_code(&plugin, data);
+            }
+            None
+        }
         PanelRequest::Emotes => {
             // Without a chat channel: the globals of Twitch, the only
             // platform so far.

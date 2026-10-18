@@ -45,7 +45,7 @@ use crate::pipeline::now_ms;
 use crate::services::overlay_hub::OverlayHub;
 use crate::services::speech::{Job, Made, Speech};
 
-pub use asked::{Asked, Asks, Heard, MAX_COMPUTING, ValueAsk};
+pub use asked::{Asked, Asks, Heard, MAX_COMPUTING, Pending, ValueAsk};
 pub use history::{describe, name_colors};
 use waiting::Chain;
 pub use waiting::{Hearers, KeptRun, PreparedEvent, WaitingEvent};

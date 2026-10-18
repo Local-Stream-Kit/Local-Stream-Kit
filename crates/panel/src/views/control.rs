@@ -5,7 +5,7 @@
 
 use protocol::activity::{QueueAction, QueueGroup};
 
-use protocol::control::{self, EffectId, Switch};
+use protocol::control::{self, Switch};
 use protocol::panel::PanelRequest;
 use protocol::streamdeck::{self, StreamDeckStatus};
 use protocol::update::{self, AppLink};
@@ -20,19 +20,19 @@ use crate::{Panel, util};
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum What {
     Card,
-    Effect,
+    Plugin,
     Queue,
     Mute,
     Event,
 }
 
 impl What {
-    const ALL: [What; 5] = [What::Card, What::Effect, What::Queue, What::Mute, What::Event];
+    const ALL: [What; 5] = [What::Card, What::Plugin, What::Queue, What::Mute, What::Event];
 
     fn name(self) -> &'static str {
         match self {
             What::Card => "card",
-            What::Effect => "effect",
+            What::Plugin => "plugin",
             What::Queue => "queue",
             What::Mute => "mute",
             What::Event => "event",
@@ -42,7 +42,7 @@ impl What {
     fn label(self) -> &'static str {
         match self {
             What::Card => "Switch a card",
-            What::Effect => "Switch an effect",
+            What::Plugin => "Switch a plugin",
             What::Queue => "The queue",
             What::Mute => "Mute the sound",
             What::Event => "Fire a Custom event",
@@ -63,7 +63,7 @@ pub fn ControlBox(props: &ControlBoxProps) -> Html {
     let shown = use_state(|| false);
     let making = use_state(|| false);
     let what = use_state(|| What::Card);
-    // A card id, an effect id or an event name; empty = the first.
+    // A card id, a plugin id or an event name; empty = the first.
     let target = use_state(String::new);
     let action = use_state(|| "toggle".to_string());
     let Some(config) = &panel.model.config else { return html! {} };
@@ -75,10 +75,12 @@ pub fn ControlBox(props: &ControlBoxProps) -> Html {
     // What's picked, the first until something is.
     let card = config.cards.iter().find(|card| card.id == *target).or(config.cards.first());
     let picked_card = card.map(|card| card.id.clone()).unwrap_or_default();
-    let picked_effect = EffectId::parse(&target).unwrap_or(EffectId::Rain);
+    let plugins = control::plugin_states(&panel.model.plugins, config);
+    let plugin = plugins.iter().find(|plugin| plugin.id == *target).or(plugins.first());
+    let picked_plugin = plugin.map(|plugin| plugin.id.clone()).unwrap_or_default();
     let path = match *what {
         What::Card => card.map(|card| control::card_path(&card.id, switch)),
-        What::Effect => Some(control::effect_path(picked_effect, switch)),
+        What::Plugin => plugin.map(|plugin| control::plugin_path(&plugin.id, switch)),
         What::Queue => {
             let action = QueueAction::parse(&action).unwrap_or(QueueAction::Toggle);
             let only = QueueGroup::parse(&target).filter(|_| action == QueueAction::Clear);
@@ -137,7 +139,7 @@ pub fn ControlBox(props: &ControlBoxProps) -> Html {
     let hidden = |text: &str| if *shown { text.to_string() } else { text.replace(&key, "…") };
 
     let actions: Vec<(&str, &str)> = match *what {
-        What::Card | What::Effect => vec![("on", "Turn on"), ("off", "Turn off"), ("toggle", "Toggle")],
+        What::Card | What::Plugin => vec![("on", "Turn on"), ("off", "Turn off"), ("toggle", "Toggle")],
         What::Queue => vec![
             ("pause", "Pause"),
             ("resume", "Resume"),
@@ -165,13 +167,13 @@ pub fn ControlBox(props: &ControlBoxProps) -> Html {
                 </div>
             </div>
         }),
-        What::Effect => Some(html! {
+        What::Plugin => Some(html! {
             <div class="setting-row">
-                <label class="setting-label" for="control-target">{ "Effect" }</label>
+                <label class="setting-label" for="control-target">{ "Plugin" }</label>
                 <div class="setting-control">
                     <select id="control-target" onchange={on_target.clone()}>
-                        { for EffectId::ALL.into_iter().map(|effect| html! {
-                            <option value={effect.id()} selected={effect == picked_effect}>{ effect.label() }</option>
+                        { for plugins.iter().map(|plugin| html! {
+                            <option value={plugin.id.clone()} selected={plugin.id == picked_plugin}>{ plugin.name.clone() }</option>
                         }) }
                     </select>
                 </div>
@@ -194,7 +196,7 @@ pub fn ControlBox(props: &ControlBoxProps) -> Html {
     };
 
     let deck = &panel.model.status.stream_deck;
-    let head = match deck.connected.first() {
+    let head = match deck.connected.first().or(deck.too_old.as_ref()) {
         Some(version) => summary(
             if deck.update_offered() { "warn" } else { "ok" },
             format!("Stream Deck {}", streamdeck::shown(version)),
@@ -298,15 +300,16 @@ pub fn ControlBox(props: &ControlBoxProps) -> Html {
     }
 }
 
-/// The Stream Deck plugin: the one connected, and Install (Update when it's
-/// older than the one built in), or, in a build without one, a link to the
-/// release's file.
+/// The Stream Deck plugin: the one connected (or one too old to stay), and
+/// Install (Update when it's older than the one built in), or, in a build
+/// without one, a link to the release's file.
 fn stream_deck(panel: &Panel, deck: &StreamDeckStatus) -> Html {
     let mut versions: Vec<&str> = deck.connected.iter().map(|version| streamdeck::shown(version)).collect();
     versions.dedup();
-    let (dot, state) = match versions.as_slice() {
-        [] => ("off", "Not connected".to_string()),
-        versions => ("ok", format!("{} connected", versions.join(", "))),
+    let (dot, state) = match (versions.as_slice(), &deck.too_old) {
+        ([], Some(old)) => ("warn", format!("{} too old", streamdeck::shown(old))),
+        ([], None) => ("off", "Not connected".to_string()),
+        (versions, _) => ("ok", format!("{} connected", versions.join(", "))),
     };
     let dot = if deck.update_offered() { "warn" } else { dot };
     let state = html! {

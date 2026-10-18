@@ -204,6 +204,14 @@ impl Guest for HostCheck {
     /// Its event nodes have no settings for it.
     fn nodes_changed(_nodes: Vec<PlacedNode>) {}
 
+    /// Its tab sends a number: that's the number on the tab, and the tab
+    /// hears it back.
+    fn on_tab(json: String) {
+        let count = json.trim().parse::<u32>().unwrap_or(0);
+        host::set_tab_count(count);
+        host::send_to_tab(&format!(r#"{{"count":{count}}}"#));
+    }
+
     fn on_timer(id: u32) {
         let later = LATER.with(|later| {
             let mut later = later.borrow_mut();

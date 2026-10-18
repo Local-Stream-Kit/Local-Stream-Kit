@@ -112,9 +112,9 @@ pub struct Manifest {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub page_hosts: Vec<String>,
     /// What it hears without a card: [`HEARS_CHAT`] (every chat message,
-    /// and moderators taking some off; its page and its server code) and
-    /// [`HEARS_EVENTS`] (every event; its server code). Only once the user
-    /// allows it ([`allowed_hears`]).
+    /// and moderators taking some off; its page and its server code or
+    /// program) and [`HEARS_EVENTS`] (every event; its server code or
+    /// program). Only once the user allows it ([`allowed_hears`]).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub hears: Vec<String>,
     /// Settings for the whole plugin, set on the panel's Plugins page (an
@@ -151,6 +151,50 @@ pub struct Manifest {
     /// gives the SVG itself (`<svg …>…</svg>`). Served at [`icon_path`].
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub icon: String,
+    /// A tab of its own in the panel, after Activity: one of its page
+    /// files, talking to its server code.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tab: Option<TabSpec>,
+}
+
+/// A plugin's tab in the panel ([`Manifest::tab`]).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TabSpec {
+    /// The tab's name, at most [`MAX_TAB_LABEL_CHARS`].
+    pub label: String,
+    /// Its page: one of its page files (a path under `overlay/`), served
+    /// at [`tab_path`] and shown in a sandboxed iframe.
+    pub page: String,
+    /// Its server code puts a number on the tab (`host.set-tab-count`), so
+    /// the tab row keeps room for one.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub count: bool,
+}
+
+/// The longest tab label, in characters: the panel's tab row is narrow.
+pub const MAX_TAB_LABEL_CHARS: usize = 16;
+
+/// Where a plugin's tab page is served.
+pub fn tab_path(plugin: &str, tab: &TabSpec) -> String {
+    format!("{}{}", files_path(plugin), tab.page)
+}
+
+/// A stylesheet with the panel's look (its colours as CSS variables, plain
+/// buttons and fields) for plugins' tab pages, served by the app.
+pub const TAB_STYLE_PATH: &str = "/plugin-tab.css";
+
+/// The most a tab page sends its server code at once
+/// ([`TabPageMessage::Send`]), in bytes of JSON.
+pub const TAB_MESSAGE_LIMIT: usize = 256 * 1024;
+
+/// What a plugin's tab page tells the panel (with `postMessage` to
+/// `window.parent`). It gets [`PluginMessage::Settings`] when it loads and
+/// when they change, and [`PluginMessage::Message`] from its server code.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum TabPageMessage {
+    /// For its server code (`on-tab`), any JSON.
+    Send { data: Value },
 }
 
 impl Manifest {
@@ -272,11 +316,12 @@ pub fn split_voice(voice: &str) -> Option<(&str, &str)> {
 /// [`Manifest::hears`]: every chat message, as [`PluginMessage::Chat`],
 /// and moderators taking some off ([`PluginMessage::ChatRemoved`],
 /// [`PluginMessage::ChatUserRemoved`], [`PluginMessage::ChatCleared`]);
-/// its page and its server code (`on-chat`) both hear it.
+/// its page and its server code (`on-chat`) or program all hear it.
 pub const HEARS_CHAT: &str = "chat";
 
 /// [`Manifest::hears`]: every event (cheers, subs, raids…, tests and
-/// replays too, but plugins' own), for its server code (`on-event`).
+/// replays too, but plugins' own), for its server code (`on-event`) or
+/// program (`heard_event`).
 pub const HEARS_EVENTS: &str = "events";
 
 /// What a plugin can hear ([`Manifest::hears`]).
@@ -464,22 +509,25 @@ pub struct Setting {
 pub const TOGGLE_ICONS: [&str; 2] = ["bold", "italic"];
 
 /// When a setting is shown: a node's, `{ "wired": "emotes" }` or
-/// `{ "unwired": "emotes" }`, by input name; a plugin's own on the Plugins
-/// page, `{ "set": "picture" }`, while that other setting is set
-/// ([`is_set`]).
+/// `{ "unwired": "emotes" }`, by input name, or `{ "is": { "shape":
+/// "picture" } }`, while its other choice settings have those values; a
+/// plugin's own on the Plugins page, `{ "set": "picture" }`, while that
+/// other setting is set ([`is_set`]).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum When {
     Wired(String),
     Unwired(String),
+    Is(BTreeMap<String, String>),
     Set(String),
 }
 
 impl When {
-    /// The input or setting it names.
-    pub fn input(&self) -> &str {
+    /// The input it names, if it's about one.
+    pub fn input(&self) -> Option<&str> {
         match self {
-            When::Wired(name) | When::Unwired(name) | When::Set(name) => name,
+            When::Wired(name) | When::Unwired(name) => Some(name),
+            When::Is(_) | When::Set(_) => None,
         }
     }
 }
@@ -609,17 +657,27 @@ pub enum SettingKind {
     Picture {
         #[serde(default)]
         default: String,
+        /// Sent as a list of paths, not one: a file is a list of one, a
+        /// folder every one of its files (see [`shared_value`]).
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        many: bool,
     },
     /// A picture or a video (`.webm`, `.mp4`) in the pictures folder;
     /// empty = none.
     Media {
         #[serde(default)]
         default: String,
+        /// As a picture's.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        many: bool,
     },
     /// A sound in the sounds folder; empty = none.
     Sound {
         #[serde(default)]
         default: String,
+        /// As a picture's.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        many: bool,
     },
     /// Stands in for the emotes input with the same key while nothing is
     /// wired into it: `"random"` (random emotes from the channel) or a list
@@ -700,6 +758,16 @@ impl SettingKind {
             _ => None,
         }
     }
+
+    /// A picture, media or sound setting sent as a list of paths.
+    pub fn many_files(&self) -> bool {
+        matches!(
+            self,
+            SettingKind::Picture { many: true, .. }
+                | SettingKind::Media { many: true, .. }
+                | SettingKind::Sound { many: true, .. }
+        )
+    }
 }
 
 /// A picture, media or sound setting's value naming a folder in the
@@ -709,14 +777,15 @@ pub fn media_folder(value: &str) -> Option<&str> {
     value.trim().strip_suffix('/').filter(|folder| !folder.is_empty() && !folder.contains('/'))
 }
 
-/// Picks a file for a setting naming a folder ([`media_folder`]): its path
-/// in the pictures (sounds) folder, `"alerts/hype.gif"`; `None` for an
-/// empty or missing folder.
-pub type PickFile<'a> = dyn FnMut(MediaKind, &str) -> Option<String> + 'a;
+/// Picks files for a setting naming a folder ([`media_folder`]), as paths
+/// in the pictures (sounds) folder, `"alerts/hype.gif"`: one of them, or
+/// with `every` (a [`many`](SettingKind::many_files) setting) all of them,
+/// in name order. None for an empty or missing folder.
+pub type PickFile<'a> = dyn FnMut(MediaKind, &str, bool) -> Vec<String> + 'a;
 
 /// For where nothing is picked (a manifest's samples): a folder is none.
-pub fn pick_nothing(_: MediaKind, _: &str) -> Option<String> {
-    None
+pub fn pick_nothing(_: MediaKind, _: &str, _: bool) -> Vec<String> {
+    Vec::new()
 }
 
 fn white() -> String {
@@ -877,9 +946,9 @@ impl Setting {
             SettingKind::Text { default, .. }
             | SettingKind::Position { default, .. }
             | SettingKind::Colour { default }
-            | SettingKind::Picture { default }
-            | SettingKind::Media { default }
-            | SettingKind::Sound { default } => Value::String(default.clone()),
+            | SettingKind::Picture { default, .. }
+            | SettingKind::Media { default, .. }
+            | SettingKind::Sound { default, .. } => Value::String(default.clone()),
             SettingKind::Bool { default } => Value::Bool(*default),
             SettingKind::Emotes { default, .. } => default.clone(),
             SettingKind::Preset {} | SettingKind::File { .. } | SettingKind::Secret { .. } => {
@@ -1116,12 +1185,21 @@ impl NodeType {
         self.settings.iter().filter(|setting| !self.inputs.iter().any(|input| input.name == setting.key))
     }
 
-    /// Whether a setting is shown (and sent) with these inputs wired.
-    pub fn shown(&self, setting: &Setting, wired: impl Fn(&str) -> bool) -> bool {
+    /// Whether a setting is shown (and sent) with these inputs wired and
+    /// these settings (the node's, as stored). A hidden one keeps its value.
+    pub fn shown(
+        &self,
+        setting: &Setting,
+        wired: impl Fn(&str) -> bool,
+        settings: &Map<String, Value>,
+    ) -> bool {
         match &setting.when {
             None => true,
             Some(When::Wired(input)) => wired(input),
             Some(When::Unwired(input)) => !wired(input),
+            Some(When::Is(values)) => values.iter().all(|(key, value)| {
+                self.setting(key).is_some_and(|other| other.read(settings.get(key)).as_str() == Some(value))
+            }),
             // Only the plugin's own settings have it (checked).
             Some(When::Set(_)) => true,
         }
@@ -1335,17 +1413,40 @@ impl NodeType {
                 problems
                     .push(format!("node {node:?}, setting {key:?}: a secret setting is the plugin's own"));
             }
-            if let Some(When::Set(_)) = &setting.when {
-                problems.push(format!(
+            match &setting.when {
+                Some(When::Set(_)) => problems.push(format!(
                     "node {node:?}, setting {key:?}: \"when\": {{ \"set\": … }} is for the plugin's own settings"
-                ));
-            } else if let Some(when) = &setting.when
-                && !self.inputs.iter().any(|input| input.name == when.input())
-            {
-                problems.push(format!(
-                    "node {node:?}, setting {key:?}: \"when\" names {:?}, which isn't one of its inputs",
-                    when.input()
-                ));
+                )),
+                Some(When::Is(values)) => {
+                    if values.is_empty() {
+                        problems.push(format!("node {node:?}, setting {key:?}: \"is\" names no setting"));
+                    }
+                    for (other, value) in values {
+                        let options = match self.own_settings().find(|each| each.key == *other && each.key != *key) {
+                            Some(Setting { kind: SettingKind::Choice { options, .. }, .. }) => options,
+                            _ => {
+                                problems.push(format!(
+                                    "node {node:?}, setting {key:?}: \"is\" names {other:?}, which isn't another of its choice settings"
+                                ));
+                                continue;
+                            }
+                        };
+                        if !options.iter().any(|choice| choice.value == *value) {
+                            problems.push(format!(
+                                "node {node:?}, setting {key:?}: \"is\": {value:?} isn't one of {other:?}'s options"
+                            ));
+                        }
+                    }
+                }
+                Some(when) => {
+                    let input = when.input().unwrap_or_default();
+                    if !self.inputs.iter().any(|each| each.name == input) {
+                        problems.push(format!(
+                            "node {node:?}, setting {key:?}: \"when\" names {input:?}, which isn't one of its inputs"
+                        ));
+                    }
+                }
+                None => {}
             }
             if let SettingKind::Emotes { count: Some(count), .. } = &setting.kind {
                 let numbers =
@@ -1472,23 +1573,32 @@ pub fn read_settings(settings: &[Setting], stored: &Map<String, Value>) -> Map<S
 /// messages, runs' `settings` and `changes`, `host.settings`): read
 /// leniently, with pictures, media and sounds as their paths on the app
 /// (an http(s) address as it is; a folder, a file `pick`ed from it; `null`
-/// for none), the rest as stored.
+/// for none; with `many`, a list of them: a folder all its files, none
+/// `[]`), the rest as stored.
 pub fn shared_value(setting: &Setting, stored: Option<&Value>, pick: &mut PickFile<'_>) -> Value {
     let value = setting.read(stored);
     let Some(kind) = setting.kind.media() else { return value };
+    let many = setting.kind.many_files();
     let name = value.as_str().unwrap_or_default().trim();
     let to_path = match kind {
         MediaKind::Picture | MediaKind::Media => crate::alert::picture_path,
         MediaKind::Sound => crate::sound::sound_path,
     };
-    if name.is_empty() {
-        Value::Null
+    let paths: Vec<String> = if name.is_empty() {
+        Vec::new()
     } else if name.starts_with("http://") || name.starts_with("https://") {
-        Value::String(name.to_string())
+        vec![name.to_string()]
     } else if let Some(folder) = media_folder(name) {
-        pick(kind, folder).map_or(Value::Null, |file| Value::String(to_path(&file)))
+        let files = pick(kind, folder, many);
+        let wanted = if many { files.len() } else { 1 };
+        files.iter().take(wanted).map(|file| to_path(file)).collect()
     } else {
-        Value::String(to_path(name))
+        vec![to_path(name)]
+    };
+    if many {
+        Value::Array(paths.into_iter().map(Value::String).collect())
+    } else {
+        paths.into_iter().next().map_or(Value::Null, Value::String)
     }
 }
 
@@ -1539,7 +1649,7 @@ impl Manifest {
                 || matches!(setting.kind, SettingKind::Emotes { .. } | SettingKind::Preset {})
             {
                 problems.push(format!(
-                    "the plugin's setting {:?}: \"when\" wired or unwired, emotes and preset settings are for nodes",
+                    "the plugin's setting {:?}: \"when\" wired, unwired or is, emotes and preset settings are for nodes",
                     setting.key
                 ));
             }
@@ -1618,6 +1728,21 @@ impl Manifest {
         }
         if !self.help.is_empty() && !is_page_path(&self.help) {
             problems.push(format!("help {:?}: a path of one of its page files (help.html)", self.help));
+        }
+        if let Some(tab) = &self.tab {
+            let label = tab.label.trim();
+            if label.is_empty() || label.chars().count() > MAX_TAB_LABEL_CHARS || label != tab.label {
+                problems.push(format!(
+                    "tab: its label {:?} needs 1 to {MAX_TAB_LABEL_CHARS} characters, without spaces around them",
+                    tab.label
+                ));
+            }
+            if !is_page_path(&tab.page) {
+                problems.push(format!(
+                    "tab: its page {:?} should be a path of one of its page files (tab.html)",
+                    tab.page
+                ));
+            }
         }
         if !self.icon.is_empty() {
             match self.icon_markup() {
@@ -1742,6 +1867,14 @@ pub struct PluginInfo {
     /// setting key.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub notes: BTreeMap<String, PluginNote>,
+    /// The number its server code puts on its tab (`host.set-tab-count`;
+    /// only with the tab's `count`): 0 shows none.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub tab_count: u32,
+}
+
+fn is_zero(count: &u32) -> bool {
+    *count == 0
 }
 
 /// A note under one of a plugin's settings, as its server code sets it:
@@ -1860,10 +1993,17 @@ impl Catalog {
         &self.plugins
     }
 
-    /// The same node types (whatever else changed, such as a program
-    /// connecting).
+    /// The same node types, and every plugin hears the same (whatever
+    /// else changed, such as a program connecting).
     pub fn same_types(&self, other: &Catalog) -> bool {
-        self.types == other.types
+        let hears = |catalog: &Catalog| -> Vec<(String, Vec<String>)> {
+            catalog
+                .plugins
+                .iter()
+                .map(|plugin| (plugin.manifest.id.clone(), plugin.manifest.hears.clone()))
+                .collect()
+        };
+        self.types == other.types && hears(self) == hears(other)
     }
 
     pub fn plugin(&self, id: &str) -> Option<&PluginInfo> {
@@ -2329,7 +2469,7 @@ mod tests {
         );
         assert!(has(&wrong, "\"lone\": an icon is for one beside another"), "{wrong:?}");
         assert!(has(&wrong, "\"shown\": when set \"nothing\", which isn't another"), "{wrong:?}");
-        assert!(has(&wrong, "\"wired\": \"when\" wired or unwired"), "{wrong:?}");
+        assert!(has(&wrong, "\"wired\": \"when\" wired, unwired or is"), "{wrong:?}");
         // Nodes' settings are shown by their inputs, not by being set.
         let node: Manifest = serde_json::from_value(json!({
             "id": "look", "name": "Look", "version": "0.1.0", "api": 1,
@@ -2372,12 +2512,30 @@ mod tests {
         assert_eq!(setting.read(Some(&json!(["Kappa"]))), json!(["Kappa"]));
         assert_eq!(setting.read(Some(&json!(5))), json!("random"), "not emotes: the default");
         let count = &fine.nodes[0].settings[1];
-        assert!(fine.nodes[0].shown(count, |_| false));
-        assert!(!fine.nodes[0].shown(count, |input| input == "emotes"));
+        let none = Map::new();
+        assert!(fine.nodes[0].shown(count, |_| false, &none));
+        assert!(!fine.nodes[0].shown(count, |input| input == "emotes", &none));
+
+        // Shown by another setting's value: a hidden one keeps its value.
+        let by_shape = node(json!([
+            { "key": "shape", "label": "Pieces", "type": "choice", "default": "confetti",
+              "options": [{ "value": "confetti", "label": "Confetti" }, { "value": "picture", "label": "A picture" }] },
+            { "key": "picture", "label": "Picture", "type": "picture", "when": { "is": { "shape": "picture" } } }
+        ]));
+        assert_eq!(by_shape.problems(), Vec::<String>::new());
+        let (ty, picture) = (&by_shape.nodes[0], &by_shape.nodes[0].settings[1]);
+        assert!(!ty.shown(picture, |_| false, &none), "the default shape");
+        let picked = json!({ "shape": "picture", "picture": "a.png" });
+        assert!(ty.shown(picture, |_| false, picked.as_object().unwrap()));
+        let other = json!({ "shape": "confetti", "picture": "a.png" });
+        assert!(!ty.shown(picture, |_| false, other.as_object().unwrap()));
 
         let broken = node(json!([
             { "key": "other", "label": "Other", "type": "emotes", "default": 3, "count": "nope" },
-            { "key": "size", "label": "Size", "type": "number", "when": { "wired": "nope" } }
+            { "key": "size", "label": "Size", "type": "number", "when": { "wired": "nope" } },
+            { "key": "shape", "label": "Pieces", "type": "choice", "options": [{ "value": "a", "label": "A" }] },
+            { "key": "x", "label": "X", "type": "number", "when": { "is": { "size": "3" } } },
+            { "key": "y", "label": "Y", "type": "number", "when": { "is": { "shape": "b" } } }
         ]));
         let problems = broken.problems();
         for expected in [
@@ -2385,6 +2543,8 @@ mod tests {
             "\"random\" or a list",
             "isn't a number input",
             "isn't one of its inputs",
+            "\"size\", which isn't another of its choice settings",
+            "\"b\" isn't one of \"shape\"'s options",
         ] {
             assert!(problems.iter().any(|problem| problem.contains(expected)), "{expected}: {problems:?}");
         }
@@ -2503,15 +2663,43 @@ mod tests {
         );
         // A folder: a file picked from it, each time.
         let stored = json!({ "picture": "alerts/", "ding": "dings/" });
-        let mut asked = Vec::new();
-        let mut pick = |kind, folder: &str| {
-            asked.push((kind, folder.to_string()));
-            (kind == MediaKind::Picture).then(|| format!("{folder}/hype.gif"))
+        let asked = std::cell::RefCell::new(Vec::new());
+        let mut pick = |kind, folder: &str, every| {
+            asked.borrow_mut().push((kind, folder.to_string(), every));
+            if kind == MediaKind::Sound {
+                return Vec::new();
+            }
+            let files = [format!("{folder}/hype.gif"), format!("{folder}/wow.png")];
+            files[..if every { 2 } else { 1 }].to_vec()
         };
         let shared = shared_settings(&settings, stored.as_object().unwrap(), &mut pick);
         assert_eq!(shared["picture"], "/pictures/alerts%2Fhype%2Egif");
         assert_eq!(shared["ding"], Value::Null, "an empty folder is none");
-        assert_eq!(asked, [(MediaKind::Picture, "alerts".into()), (MediaKind::Sound, "dings".into())]);
+        assert_eq!(
+            *asked.borrow(),
+            [(MediaKind::Picture, "alerts".into(), false), (MediaKind::Sound, "dings".into(), false)]
+        );
+        // With many: a list, of every file in a folder.
+        let many: Vec<Setting> = serde_json::from_value(json!([
+            { "key": "pictures", "label": "Picture", "type": "picture", "many": true },
+            { "key": "file", "label": "Picture", "type": "picture", "many": true },
+            { "key": "none", "label": "Picture", "type": "picture", "many": true },
+            { "key": "dings", "label": "Sound", "type": "sound", "many": true }
+        ]))
+        .unwrap();
+        let stored = json!({ "pictures": "alerts/", "file": "a.png", "dings": "dings/" });
+        asked.borrow_mut().clear();
+        let shared = shared_settings(&many, stored.as_object().unwrap(), &mut pick);
+        assert_eq!(
+            Value::Object(shared),
+            json!({
+                "pictures": ["/pictures/alerts%2Fhype%2Egif", "/pictures/alerts%2Fwow%2Epng"],
+                "file": ["/pictures/a%2Epng"],
+                "none": [],
+                "dings": []
+            })
+        );
+        assert!(asked.borrow().iter().all(|(_, _, every)| *every), "{asked:?}");
         assert_eq!(media_folder(" alerts/ "), Some("alerts"));
         assert_eq!(media_folder("alerts/hype.gif"), None);
         assert_eq!(media_folder("/"), None);
@@ -2644,6 +2832,36 @@ mod tests {
         }
         assert!(with(&format!("<svg>{}</svg>", " ".repeat(MAX_ICON_BYTES)))[0].contains("at most 16 KB"));
         assert_eq!(icon_path("vtube"), "/plugin-icons/vtube");
+    }
+
+    #[test]
+    fn a_tab_has_a_short_label_and_one_of_its_page_files() {
+        let manifest: Manifest = serde_json::from_value(json!({
+            "id": "requests", "name": "Media requests", "version": "0.1.0", "api": 1,
+            "tab": { "label": "Requests", "page": "tab.html", "count": true }
+        }))
+        .unwrap();
+        assert_eq!(manifest.problems(), Vec::<String>::new());
+        let tab = manifest.tab.clone().unwrap();
+        assert!(tab.count);
+        assert_eq!(tab_path("requests", &tab), "/plugins/requests/tab.html");
+        let with = |label: &str, page: &str| {
+            let tab = TabSpec { label: label.into(), page: page.into(), count: false };
+            Manifest { tab: Some(tab), ..manifest.clone() }.problems()
+        };
+        assert_eq!(with("Sixteen letters!", "pages/tab.html"), Vec::<String>::new());
+        for label in ["", "  ", " Requests", "Seventeen letters"] {
+            assert!(with(label, "tab.html")[0].contains("1 to 16 characters"), "{label:?}");
+        }
+        for page in ["", "../tab.html", "/tab.html", "C:tab.html", "pages\\tab.html"] {
+            assert!(with("Requests", page)[0].contains("one of its page files"), "{page:?}");
+        }
+        // A count leaves the manifest as it was when there's none.
+        let plain = serde_json::to_value(TabSpec { label: "A".into(), page: "a.html".into(), count: false });
+        assert_eq!(plain.unwrap(), json!({ "label": "A", "page": "a.html" }));
+        let sent: TabPageMessage =
+            serde_json::from_value(json!({ "type": "send", "data": { "add": 1 } })).unwrap();
+        assert_eq!(sent, TabPageMessage::Send { data: json!({ "add": 1 }) });
     }
 
     fn membership() -> Manifest {

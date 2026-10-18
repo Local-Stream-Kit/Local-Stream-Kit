@@ -1,11 +1,13 @@
 //! The control API (see `protocol::control` and `docs/control-api.md`):
-//! cards and effects on / off, the queue, and Custom events, for a Stream
+//! cards and plugins on / off, the queue, and Custom events, for a Stream
 //! Deck, a hotkey tool or a script. Web requests and the WebSocket both go
 //! through [`run`]. On the WebSocket, a program can also be a plugin (the
 //! external connection API): it registers its node types, fires its event
-//! nodes, is sent its effect nodes' runs, and makes messages in its voices
-//! when asked. A program can also say which it is (`hello`): Status shows
-//! the Stream Deck plugin's version while it's connected.
+//! nodes (all of a node's copies on the cards, or one), is sent its effect
+//! nodes' runs, makes messages in its voices when asked, says where its
+//! flow nodes send events on and what its value nodes give, and hears the
+//! chat and events. A program can also say which it is (`hello`): Status
+//! shows the Stream Deck plugin's version while it's connected.
 //!
 //! Every request needs the key: browsers let any web page send requests to
 //! localhost (they just can't read the answers), and WebSockets aren't
@@ -26,8 +28,8 @@ use futures_util::{SinkExt, StreamExt};
 use protocol::activity::{QueueAction, QueueGroup};
 use protocol::cards::Category;
 use protocol::control::{
-    CardState, ControlMessage, ControlRequest, ControlState, EffectId, HistorySummary, KEY_HEADER, KEY_PARAM,
-    QueueSummary, SoundState, Switch,
+    self, CONTROL_VERSION, CardState, ControlMessage, ControlRequest, ControlState, HistorySummary,
+    KEY_HEADER, KEY_PARAM, PlacedNode, QueueSummary, SoundState, Switch,
 };
 use protocol::plugin::{Manifest, PluginMessage};
 use protocol::{Command, Envelope};
@@ -39,6 +41,8 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 use crate::model::{ChannelRef, Input, InputKind, Origin, PlatformEvent};
 use crate::panel::PanelState;
 use crate::pipeline::now_ms;
+use crate::plugins::server::{Placed, outputs_of_json, placed_nodes, placed_settings};
+use crate::services::activity::{Activity, Asked, Asks, Heard, Pending};
 use crate::services::overlay_hub::OverlayHub;
 use crate::services::speech::{self, MAX_AUDIO, SpeakRequest, Speaker};
 use crate::services::status::StreamDeckGuard;
@@ -201,22 +205,21 @@ pub async fn run(request: ControlRequest, panel: &PanelState) -> Result<ControlM
             tracing::info!(card = card.name, on = card.on, "control API");
             Ok(ControlMessage::Card { card })
         }
-        ControlRequest::Effect { id, set } => {
-            let effect = EffectId::parse(&id).ok_or_else(|| {
-                let known: Vec<&str> = EffectId::ALL.iter().map(|effect| effect.id()).collect();
-                ControlError::new(
-                    StatusCode::NOT_FOUND,
-                    format!("no effect {id:?}; there are {}", known.join(", ")),
-                )
-            })?;
-            let effect = update(panel, |config| {
-                let enabled = effect.enabled_mut(config);
-                *enabled = set.apply(*enabled);
-                Ok(effect.state(config))
+        ControlRequest::Plugin { id, set } => {
+            let catalog = panel.plugins.catalog();
+            let plugin = update(panel, |config| {
+                control::switch_plugin(&id, set, &catalog, config).ok_or_else(|| {
+                    let known: Vec<String> = control::plugin_states(&catalog, config)
+                        .into_iter()
+                        .map(|plugin| plugin.id)
+                        .collect();
+                    let message = format!("no plugin {id:?}; there are {}", known.join(", "));
+                    ControlError::new(StatusCode::NOT_FOUND, message)
+                })
             })
             .await?;
-            tracing::info!(effect = effect.id, on = effect.on, "control API");
-            Ok(ControlMessage::Effect { effect })
+            tracing::info!(plugin = plugin.id, on = plugin.on, "control API");
+            Ok(ControlMessage::Plugin { plugin })
         }
         ControlRequest::Queue { action, kind } => {
             match (action, kind) {
@@ -264,12 +267,14 @@ pub async fn run(request: ControlRequest, panel: &PanelState) -> Result<ControlM
             StatusCode::BAD_REQUEST,
             "a program says hello on the WebSocket (/control/ws)",
         )),
-        ControlRequest::Register { .. } | ControlRequest::Emit { .. } | ControlRequest::Spoken { .. } => {
-            Err(ControlError::new(
-                StatusCode::BAD_REQUEST,
-                "a program connects as a plugin on the WebSocket (/control/ws)",
-            ))
-        }
+        ControlRequest::Register { .. }
+        | ControlRequest::Emit { .. }
+        | ControlRequest::Spoken { .. }
+        | ControlRequest::Routed { .. }
+        | ControlRequest::Computed { .. } => Err(ControlError::new(
+            StatusCode::BAD_REQUEST,
+            "a program connects as a plugin on the WebSocket (/control/ws)",
+        )),
     }
 }
 
@@ -295,10 +300,13 @@ async fn send_event(panel: &PanelState, event: PlatformEvent) -> Result<(), Cont
 }
 
 /// The program says which it is. A Stream Deck plugin counts as connected,
-/// with its version, until the connection closes (or another hello).
+/// with its version, until the connection closes (or another hello). One
+/// that speaks an older control API hangs up on seeing the state: Status
+/// offers its update instead.
 fn hello(
     client: &str,
     version: &str,
+    api: u32,
     stream_deck: &mut Option<StreamDeckGuard>,
     panel: &PanelState,
 ) -> Result<ControlMessage, ControlError> {
@@ -307,23 +315,41 @@ fn hello(
         let message = "a hello needs the program's name (up to 64 characters) and its version (up to 32)";
         return Err(ControlError::new(StatusCode::BAD_REQUEST, message));
     }
-    tracing::info!(client, version, "control API client said which it is");
+    tracing::info!(client, version, api, "control API client said which it is");
     *stream_deck = None;
     if client == protocol::streamdeck::CLIENT {
-        *stream_deck = Some(panel.status.stream_deck_connected(version.to_string()));
+        if api < CONTROL_VERSION {
+            tracing::warn!(version, api, "the Stream Deck plugin is too old for this app's control API");
+            panel.status.stream_deck_too_old(version.to_string());
+        } else {
+            *stream_deck = Some(panel.status.stream_deck_connected(version.to_string()));
+        }
     }
     Ok(ControlMessage::Hello { version: crate::update::RUNNING.to_string() })
 }
 
-/// A connection that registered as a plugin: its id, and the overlay
-/// commands, to pass its effect nodes' runs on; with voices, the messages
-/// it's asked to read, and the ones it hasn't answered.
+/// A connection that registered as a plugin: its id and manifest, and the
+/// overlay commands, to pass its effect nodes' runs on; with voices, the
+/// messages it's asked to read, and the ones it hasn't answered; what
+/// cards ask its flow and value nodes, and what it hears.
 struct Registered {
     id: String,
+    manifest: Manifest,
     commands: broadcast::Receiver<Arc<Envelope>>,
     speaking: Option<(Speaker, mpsc::UnboundedReceiver<SpeakRequest>)>,
     waiting: HashMap<u64, oneshot::Sender<Result<speech::Audio, String>>>,
     next_request: u64,
+    /// What cards ask it and what it hears come here until it goes.
+    asks: Asks,
+    asked: mpsc::UnboundedReceiver<Asked>,
+    /// The events at its flow nodes it was asked about and hasn't answered.
+    routes: Pending,
+    /// Its value nodes' runs it hasn't answered.
+    computes: Pending,
+    /// More waits to be heard ([`Asks::next_heard`]).
+    hearing: bool,
+    /// Its event nodes on the cards, as it was last told them.
+    placed: Option<Vec<Placed>>,
 }
 
 /// The program registers as a plugin, once per connection.
@@ -341,35 +367,62 @@ async fn register(
     let voices = !manifest.voices.is_empty();
     panel
         .plugins
-        .connect(manifest)
+        .connect(manifest.clone())
         .map_err(|problems| ControlError::new(StatusCode::BAD_REQUEST, problems.join("; ")))?;
     let speaking = voices.then(|| {
         let (speaker, asked) = mpsc::unbounded_channel();
         panel.speech.add_speaker(&id, speaker.clone());
         (speaker, asked)
     });
+    let (asks, asked) = panel.activity.asks(&id);
     *plugin = Some(Registered {
         id: id.clone(),
+        manifest,
         commands: hub.subscribe(),
         speaking,
         waiting: HashMap::new(),
         next_request: 1,
+        asks,
+        asked,
+        routes: Pending::default(),
+        computes: Pending::default(),
+        hearing: false,
+        placed: None,
     });
     panel.store.set_plugins(panel.plugins.catalog()).await;
     Ok(ControlMessage::Registered { plugin: id })
 }
 
 /// Fires one of the registered plugin's event nodes (its `output`, or
-/// `event`).
+/// `event`): every copy on the cards, or the one placed copy `to`.
 async fn emit(
     node: String,
     output: Option<String>,
     values: Map<String, Value>,
+    to: Option<String>,
     plugin: Option<&Registered>,
     panel: &PanelState,
 ) -> Result<ControlMessage, ControlError> {
     let Some(plugin) = plugin else {
         return Err(ControlError::new(StatusCode::CONFLICT, "register as a plugin first"));
+    };
+    let node = match &to {
+        None if node.is_empty() => {
+            let message = "an emit needs the event node (node), or one placed copy's id (to)";
+            return Err(ControlError::new(StatusCode::BAD_REQUEST, message));
+        }
+        None => node,
+        Some(to) => match plugin.placed.iter().flatten().find(|placed| placed.id == *to) {
+            Some(placed) if node.is_empty() || node == placed.node => placed.node.clone(),
+            Some(placed) => {
+                let message = format!("{to:?} is a copy of its event node {:?}, not {node:?}", placed.node);
+                return Err(ControlError::new(StatusCode::BAD_REQUEST, message));
+            }
+            None => {
+                let message = format!("none of its event nodes on a card has the id {to:?}");
+                return Err(ControlError::new(StatusCode::NOT_FOUND, message));
+            }
+        },
     };
     let catalog = panel.plugins.catalog();
     let ty = catalog.node_type(&plugin.id, &node).filter(|ty| ty.category == Category::Events);
@@ -384,8 +437,7 @@ async fn emit(
         return Err(ControlError::new(StatusCode::NOT_FOUND, message));
     }
     let output = output.filter(|output| output != "event");
-    let event =
-        PlatformEvent::Plugin { plugin: plugin.id.clone(), node: node.clone(), values, output, to: None };
+    let event = PlatformEvent::Plugin { plugin: plugin.id.clone(), node: node.clone(), values, output, to };
     send_event(panel, event).await?;
     tracing::debug!(plugin = plugin.id, node, "plugin event");
     Ok(ControlMessage::Emitted { node })
@@ -433,34 +485,183 @@ fn spoken(
     }
 }
 
+/// The registered plugin's answer to a [`ControlMessage::Route`]: the
+/// event goes on from `output` (an output it hasn't sends it nowhere), or
+/// with none, nowhere.
+fn routed(
+    plugin: Option<&mut Registered>,
+    run: u64,
+    output: Option<String>,
+    values: Map<String, Value>,
+    activity: &Activity,
+) -> Result<(), ControlError> {
+    let Some(plugin) = plugin else {
+        return Err(ControlError::new(StatusCode::CONFLICT, "register as a plugin first"));
+    };
+    let Some(node) = plugin.routes.take(run) else {
+        let message = format!("no event waits at run {run} (answered already, or not its flow nodes')");
+        return Err(ControlError::new(StatusCode::NOT_FOUND, message));
+    };
+    let result = match output {
+        None => Ok(()),
+        Some(output) => {
+            let ty = plugin.manifest.nodes.iter().find(|ty| ty.id == node && ty.category == Category::Flow);
+            match ty {
+                Some(ty) if ty.fires(&output) => {
+                    activity.carry_on_with(&plugin.id, run, &output, outputs_of_json(ty, &values))
+                }
+                _ => Err(format!(
+                    "its flow node {node:?} has no event output {output:?}; the event went nowhere"
+                )),
+            }
+        }
+    };
+    activity.forget_run(&plugin.id, run);
+    result.map_err(|why| ControlError::new(StatusCode::NOT_FOUND, why))
+}
+
+/// The registered plugin's answer to a [`ControlMessage::Compute`].
+fn computed(
+    plugin: Option<&mut Registered>,
+    run: u64,
+    values: Map<String, Value>,
+    activity: &Activity,
+) -> Result<(), ControlError> {
+    let Some(plugin) = plugin else {
+        return Err(ControlError::new(StatusCode::CONFLICT, "register as a plugin first"));
+    };
+    let Some(node) = plugin.computes.take(run) else {
+        let message =
+            format!("no value node waits for run {run} (answered already, or not its value nodes')");
+        return Err(ControlError::new(StatusCode::NOT_FOUND, message));
+    };
+    let ty = plugin.manifest.nodes.iter().find(|ty| ty.id == node && ty.category == Category::Values);
+    let values = ty.map(|ty| outputs_of_json(ty, &values)).unwrap_or_default();
+    activity.computed(&plugin.id, run, values).map_err(|why| ControlError::new(StatusCode::NOT_FOUND, why))
+}
+
 /// What comes for a registered plugin's program.
 enum ForPlugin {
     /// An overlay command (one of its effect nodes' runs, maybe).
     Command(Result<Arc<Envelope>, RecvError>),
     /// A message to read in one of its voices.
     Speak(Box<ControlMessage>),
+    /// Something a card asks it, or a wake for what it hears.
+    Asked(Box<Asked>),
 }
 
 /// The next thing for the registered plugin's program; never, if the
 /// connection isn't a plugin.
 async fn for_plugin(plugin: &mut Option<Registered>) -> ForPlugin {
-    let Some(Registered { commands, speaking, waiting, next_request, .. }) = plugin else {
+    let Some(Registered { commands, speaking, waiting, next_request, asked, hearing, .. }) = plugin else {
         return std::future::pending().await;
     };
-    let asked = async {
+    let speak = async {
         match speaking {
             Some((_, asked)) => asked.recv().await,
             None => std::future::pending().await,
         }
     };
+    // One heard at a time, the next once whatever else came is sent.
+    let more_heard = async {
+        if !*hearing {
+            std::future::pending::<()>().await;
+        }
+    };
     tokio::select! {
         command = commands.recv() => ForPlugin::Command(command),
-        Some(SpeakRequest { voice, text, speed, answer }) = asked => {
+        Some(SpeakRequest { voice, text, speed, answer }) = speak => {
             let request = *next_request;
             *next_request += 1;
             waiting.insert(request, answer);
             ForPlugin::Speak(Box::new(ControlMessage::Speak { request, voice, text, speed }))
         }
+        Some(asked) = asked.recv() => ForPlugin::Asked(Box::new(asked)),
+        () = more_heard => ForPlugin::Asked(Box::new(Asked::Heard)),
+    }
+}
+
+/// What a card asks the registered plugin (kept until it answers), or
+/// the next thing it hears, as a message to its program.
+fn ask(plugin: &mut Registered, asked: Asked) -> Option<ControlMessage> {
+    match asked {
+        Asked::Route { node, input, values, viewer, run, origin } => {
+            plugin.routes.park(run, &node);
+            Some(ControlMessage::Route { run, node, input, values, viewer, origin })
+        }
+        Asked::Compute { node, values, run, origin } => {
+            plugin.computes.park(run, &node);
+            Some(ControlMessage::Compute { run, node, values, origin })
+        }
+        Asked::Heard => {
+            let (heard, more) = plugin.asks.next_heard();
+            plugin.hearing = more;
+            heard.and_then(heard_message)
+        }
+    }
+}
+
+/// What the registered plugin hears, as a message to its program: the
+/// chat as a page that hears it gets it.
+fn heard_message(heard: Heard) -> Option<ControlMessage> {
+    Some(match heard {
+        Heard::Chat(PluginMessage::Chat { line }) => ControlMessage::Chat { line: Box::new(line) },
+        Heard::Chat(PluginMessage::ChatRemoved { id }) => ControlMessage::ChatRemoved { id },
+        Heard::Chat(PluginMessage::ChatUserRemoved { platform, user_id }) => {
+            ControlMessage::ChatUserRemoved { platform, user_id }
+        }
+        Heard::Chat(PluginMessage::ChatCleared { platform }) => ControlMessage::ChatCleared { platform },
+        Heard::Chat(_) => return None,
+        Heard::Event { kind, summary, viewer, values, origin } => {
+            ControlMessage::HeardEvent { kind, summary, viewer, values, origin }
+        }
+    })
+}
+
+/// The registered plugin's event nodes on the cards, as a message to its
+/// program, when they changed since it was last told (or it hasn't been
+/// yet); none for a plugin without event nodes.
+fn nodes_changed(plugin: &mut Registered, panel: &PanelState) -> Option<ControlMessage> {
+    let manifest = &plugin.manifest;
+    let event_node =
+        |id: &str| manifest.nodes.iter().find(|ty| ty.id == id && ty.category == Category::Events);
+    if !manifest.nodes.iter().any(|ty| ty.category == Category::Events) {
+        return None;
+    }
+    let placed = placed_nodes(manifest, &panel.store.current());
+    if plugin.placed.as_ref() == Some(&placed) {
+        return None;
+    }
+    let nodes = placed
+        .iter()
+        .map(|each| PlacedNode {
+            id: each.id.clone(),
+            node: each.node.clone(),
+            card: each.card.clone(),
+            on: each.on,
+            settings: placed_settings(event_node(&each.node), each, &panel.media),
+        })
+        .collect();
+    plugin.placed = Some(placed);
+    Some(ControlMessage::Nodes { nodes })
+}
+
+/// The registered plugin's program went: nothing more that cards ask
+/// comes to it, and what it was asked and won't answer is let go at once
+/// (an event at its flow node goes nowhere, its value node gives
+/// nothing), as when server code stops.
+fn let_go(plugin: Registered, activity: &Activity) {
+    let Registered { id, asks, mut asked, mut routes, mut computes, .. } = plugin;
+    drop(asks);
+    asked.close();
+    while let Ok(asked) = asked.try_recv() {
+        activity.unanswered(&id, asked);
+    }
+    for run in routes.drain() {
+        activity.forget_run(&id, run);
+    }
+    for run in computes.drain() {
+        let _ = activity.computed(&id, run, Vec::new());
     }
 }
 
@@ -475,7 +676,7 @@ fn plugin_run(envelope: &Envelope, plugin: &str) -> Option<ControlMessage> {
         PluginMessage::Run { node, input, values, changes, settings, .. } => {
             Some(ControlMessage::Run { node, input, values, changes, settings })
         }
-        // Hearing the chat is for pages (a program has none).
+        // The chat comes to a program as what it hears (`heard_message`).
         PluginMessage::Message { .. }
         | PluginMessage::Settings { .. }
         | PluginMessage::Skip { .. }
@@ -489,7 +690,12 @@ fn plugin_run(envelope: &Envelope, plugin: &str) -> Option<ControlMessage> {
 }
 
 fn state(panel: &PanelState) -> ControlState {
-    ControlState::new(&panel.store.current(), &panel.activity.queue(), history(panel))
+    ControlState::new(
+        &panel.store.current(),
+        &panel.plugins.catalog(),
+        &panel.activity.queue(),
+        history(panel),
+    )
 }
 
 fn history(panel: &PanelState) -> HistorySummary {
@@ -512,7 +718,7 @@ fn answer(message: ControlMessage) -> Response {
     let body = match message {
         ControlMessage::State { state } => serde_json::to_value(state),
         ControlMessage::Card { card } => serde_json::to_value(card),
-        ControlMessage::Effect { effect } => serde_json::to_value(effect),
+        ControlMessage::Plugin { plugin } => serde_json::to_value(plugin),
         ControlMessage::Queue { queue } => serde_json::to_value(queue),
         ControlMessage::SkippedItem { id, was } => Ok(serde_json::json!({ "id": id, "was": was })),
         ControlMessage::MovedItem { id, was } => Ok(serde_json::json!({ "id": id, "was": was })),
@@ -524,7 +730,15 @@ fn answer(message: ControlMessage) -> Response {
         | ControlMessage::Registered { .. }
         | ControlMessage::Emitted { .. }
         | ControlMessage::Run { .. }
-        | ControlMessage::Speak { .. }) => serde_json::to_value(message),
+        | ControlMessage::Speak { .. }
+        | ControlMessage::Route { .. }
+        | ControlMessage::Compute { .. }
+        | ControlMessage::Chat { .. }
+        | ControlMessage::ChatRemoved { .. }
+        | ControlMessage::ChatUserRemoved { .. }
+        | ControlMessage::ChatCleared { .. }
+        | ControlMessage::HeardEvent { .. }
+        | ControlMessage::Nodes { .. }) => serde_json::to_value(message),
         ControlMessage::Error { status, error } => {
             let status = StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
             return ControlError::new(status, error).into_response();
@@ -566,15 +780,15 @@ pub async fn card(
     }
 }
 
-/// `/control/effects/{id}/{on|off|toggle}`.
-pub async fn effect(
+/// `/control/plugins/{id}/{on|off|toggle}`.
+pub async fn plugin(
     State(app): State<AppState>,
     Path((id, set)): Path<(String, String)>,
     headers: HeaderMap,
     Query(params): Query<Params>,
 ) -> Response {
     match switch(&set) {
-        Ok(set) => respond(&app, &headers, &params, ControlRequest::Effect { id, set }).await,
+        Ok(set) => respond(&app, &headers, &params, ControlRequest::Plugin { id, set }).await,
         Err(error) => error.into_response(),
     }
 }
@@ -722,6 +936,7 @@ async fn connection(socket: WebSocket, panel: PanelState, hub: OverlayHub) {
     let (mut sender, mut receiver) = socket.split();
     let mut config_changes = panel.store.subscribe();
     let mut activity_changes = panel.activity.subscribe();
+    let mut plugin_changes = panel.plugins.subscribe();
     tracing::info!("control API client connected");
     let mut last = state(&panel);
     if send(&mut sender, &ControlMessage::State { state: last.clone() }).await.is_err() {
@@ -734,17 +949,29 @@ async fn connection(socket: WebSocket, panel: PanelState, hub: OverlayHub) {
             message = receiver.next() => match message {
                 Some(Ok(WsMessage::Text(text))) => {
                     let answer = match serde_json::from_str::<ControlRequest>(&text) {
-                        Ok(ControlRequest::Hello { client, version }) => {
-                            hello(&client, &version, &mut stream_deck, &panel)
+                        Ok(ControlRequest::Hello { client, version, api }) => {
+                            hello(&client, &version, api, &mut stream_deck, &panel)
                         }
                         Ok(ControlRequest::Register { plugin: manifest }) => {
                             register(*manifest, &mut plugin, &panel, &hub).await
                         }
-                        Ok(ControlRequest::Emit { node, output, values }) => {
-                            emit(node, output, values, plugin.as_ref(), &panel).await
+                        Ok(ControlRequest::Emit { node, output, values, to }) => {
+                            emit(node, output, values, to, plugin.as_ref(), &panel).await
                         }
                         Ok(ControlRequest::Spoken { request, audio, format, error }) => {
                             match spoken(plugin.as_mut(), request, audio, format, error) {
+                                Ok(()) => continue,
+                                Err(error) => Err(error),
+                            }
+                        }
+                        Ok(ControlRequest::Routed { run, output, values }) => {
+                            match routed(plugin.as_mut(), run, output, values, &panel.activity) {
+                                Ok(()) => continue,
+                                Err(error) => Err(error),
+                            }
+                        }
+                        Ok(ControlRequest::Computed { run, values }) => {
+                            match computed(plugin.as_mut(), run, values, &panel.activity) {
                                 Ok(()) => continue,
                                 Err(error) => Err(error),
                             }
@@ -762,6 +989,13 @@ async fn connection(socket: WebSocket, panel: PanelState, hub: OverlayHub) {
             next = for_plugin(&mut plugin) => match next {
                 ForPlugin::Speak(speak) => {
                     if send(&mut sender, &speak).await.is_err() {
+                        break;
+                    }
+                    continue;
+                }
+                ForPlugin::Asked(asked) => {
+                    let message = plugin.as_mut().and_then(|plugin| ask(plugin, *asked));
+                    if let Some(message) = message && send(&mut sender, &message).await.is_err() {
                         break;
                     }
                     continue;
@@ -784,6 +1018,8 @@ async fn connection(socket: WebSocket, panel: PanelState, hub: OverlayHub) {
             changed = config_changes.changed() => if changed.is_err() { break },
             // The queue, and the history's new events.
             change = activity_changes.recv() => if let Err(RecvError::Closed) = change { break },
+            // Plugins installed, removed, or programs connecting: the effects.
+            changed = plugin_changes.changed() => if changed.is_err() { break },
         }
         let now = state(&panel);
         if now != last {
@@ -792,12 +1028,22 @@ async fn connection(socket: WebSocket, panel: PanelState, hub: OverlayHub) {
             }
             last = now;
         }
+        // Its event nodes on the cards, once it has registered and as they
+        // change.
+        let nodes = plugin.as_mut().and_then(|plugin| nodes_changed(plugin, &panel));
+        if let Some(nodes) = nodes
+            && send(&mut sender, &nodes).await.is_err()
+        {
+            break;
+        }
     }
     if let Some(plugin) = plugin {
         if let Some((speaker, _)) = &plugin.speaking {
             panel.speech.remove_speaker(&plugin.id, speaker);
         }
-        panel.plugins.disconnect(&plugin.id);
+        let id = plugin.id.clone();
+        let_go(plugin, &panel.activity);
+        panel.plugins.disconnect(&id);
         panel.store.set_plugins(panel.plugins.catalog()).await;
     }
     tracing::info!("control API client disconnected");
@@ -859,6 +1105,135 @@ mod tests {
         for wrong in ["", "next", "-1", "4.5"] {
             assert_eq!(item_id(wrong).map_err(|error| error.status), Err(StatusCode::NOT_FOUND), "{wrong:?}");
         }
+    }
+
+    /// A program registered as `manifest`'s plugin, without a connection.
+    fn registered(activity: &Activity, manifest: Manifest) -> Registered {
+        let (asks, asked) = activity.asks(&manifest.id);
+        Registered {
+            id: manifest.id.clone(),
+            manifest,
+            commands: OverlayHub::new().subscribe(),
+            speaking: None,
+            waiting: HashMap::new(),
+            next_request: 1,
+            asks,
+            asked,
+            routes: Pending::default(),
+            computes: Pending::default(),
+            hearing: false,
+            placed: None,
+        }
+    }
+
+    /// What the program is sent next, if anything waits.
+    fn next(plugin: &mut Registered) -> Option<ControlMessage> {
+        let asked = plugin.asked.try_recv().ok()?;
+        ask(plugin, asked)
+    }
+
+    fn then() -> crate::cards::Then {
+        use crate::pipeline::testing::{origin, user};
+        let raid = crate::model::Signal::new(
+            origin(),
+            crate::model::SignalKind::Raid { from: user("r"), viewers: 3 },
+        );
+        crate::cards::Then::for_tests("card", 2, raid)
+    }
+
+    fn values(json: Value) -> Map<String, Value> {
+        json.as_object().unwrap().clone()
+    }
+
+    #[test]
+    fn a_programs_answers_carry_its_cards_on_and_what_it_leaves_is_let_go() {
+        use crate::services::activity::{Cause, ValueAsk};
+        let activity = Activity::for_tests(OverlayHub::new(), crate::services::speech::Speech::off());
+        let mut resumes = activity.resumes();
+        let manifest: Manifest = serde_json::from_value(serde_json::json!({
+            "id": "regulars", "name": "Regulars", "version": "1.0.0", "api": 1,
+            "nodes": [
+                { "id": "first", "title": "Regulars first", "category": "flow",
+                  "inputs": [{ "name": "event", "label": "Event", "type": "event" }],
+                  "outputs": [
+                    { "name": "regular", "label": "Regular", "type": "event" },
+                    { "name": "count", "label": "Messages", "type": "number" }
+                  ] },
+                { "id": "messages", "title": "Messages", "category": "values",
+                  "outputs": [{ "name": "count", "label": "Count", "type": "number" }] }
+            ]
+        }))
+        .unwrap();
+        let mut plugin = registered(&activity, manifest);
+        let route =
+            || activity.route("regulars", "first", "event", Map::new(), None, then(), &Cause::default());
+        let filled = |resume: &crate::services::activity::Resume, key: &str| {
+            serde_json::to_value(&resume.then).unwrap()["filled"][key].clone()
+        };
+        let number = |number| serde_json::to_value(crate::cards::Value::Number(number)).unwrap();
+
+        // A flow node's event goes on from Regular, with its count (a text
+        // that reads as a number); answered once.
+        assert!(route());
+        let Some(ControlMessage::Route { run, node, .. }) = next(&mut plugin) else { panic!("a route") };
+        assert_eq!(node, "first");
+        routed(
+            Some(&mut plugin),
+            run,
+            Some("regular".into()),
+            values(serde_json::json!({ "count": "4" })),
+            &activity,
+        )
+        .unwrap();
+        let resume = resumes.try_recv().expect("carried on");
+        assert_eq!((resume.output.as_str(), filled(&resume, "2/count")), ("regular", number(4.0)));
+        let again = routed(Some(&mut plugin), run, None, Map::new(), &activity).unwrap_err();
+        assert_eq!(again.status, StatusCode::NOT_FOUND, "{again:?}");
+        // An output it hasn't: nowhere, saying so.
+        assert!(route());
+        let Some(ControlMessage::Route { run, .. }) = next(&mut plugin) else { panic!("a route") };
+        let wrong = routed(Some(&mut plugin), run, Some("new".into()), Map::new(), &activity).unwrap_err();
+        assert!(wrong.message.contains("no event output \"new\""), "{wrong:?}");
+        assert!(resumes.try_recv().is_err(), "went nowhere");
+
+        // A value node's answer goes into the event waiting for it.
+        let compute = || {
+            let mut waiting = then();
+            waiting.into = vec![(3, "trigger".into())];
+            let ask =
+                ValueAsk { plugin: "regulars".into(), node: 4, ty: "messages".into(), values: Map::new() };
+            activity.compute(waiting, vec![ask], &Cause::default())
+        };
+        assert!(compute());
+        let Some(ControlMessage::Compute { run, node, .. }) = next(&mut plugin) else { panic!("a compute") };
+        assert_eq!(node, "messages");
+        computed(Some(&mut plugin), run, values(serde_json::json!({ "count": 12 })), &activity).unwrap();
+        let resume = resumes.try_recv().expect("computed");
+        assert_eq!(filled(&resume, "4/count"), number(12.0));
+
+        // It hears one at a time.
+        let cleared = |platform: &str| Heard::Chat(PluginMessage::ChatCleared { platform: platform.into() });
+        activity.hear("regulars", cleared("twitch"));
+        activity.hear("regulars", cleared("youtube"));
+        assert_eq!(next(&mut plugin), Some(ControlMessage::ChatCleared { platform: "twitch".into() }));
+        assert!(plugin.hearing, "more waits");
+        assert_eq!(
+            ask(&mut plugin, Asked::Heard),
+            Some(ControlMessage::ChatCleared { platform: "youtube".into() })
+        );
+        assert!(!plugin.hearing);
+
+        // It goes: what it was sent and what was on its way are let go at
+        // once, and nothing more comes to it.
+        assert!(route());
+        let Some(ControlMessage::Route { run: parked, .. }) = next(&mut plugin) else { panic!("a route") };
+        assert!(compute(), "not sent yet");
+        let_go(plugin, &activity);
+        let resume = resumes.try_recv().expect("the value node gave nothing, at once");
+        assert_eq!(resume.then.into, [(3, "trigger".to_string())]);
+        assert!(resumes.try_recv().is_err(), "the parked event went nowhere");
+        assert!(activity.carry_on("regulars", parked, "regular").is_err(), "forgotten");
+        assert!(!route(), "gone");
     }
 
     #[test]

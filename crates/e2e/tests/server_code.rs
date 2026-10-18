@@ -118,15 +118,45 @@ async fn plugin_value_nodes_give_their_values() {
             wire((2, "text"), (3, "message")),
         ],
     ));
+    // The Counter example's Current count: a wins and losses tracker, two
+    // counters in one text whenever either is counted.
+    for name in ["Wins", "Losses"] {
+        let count = plugin_node(2, "counter", "count", serde_json::json!({ "counter": name, "show": false }));
+        config.cards.push(card(name, vec![custom(name), count], vec![wire((1, "event"), (2, "trigger"))]));
+    }
+    let current =
+        |id, name: &str| plugin_node(id, "counter", "current", serde_json::json!({ "counter": name }));
+    let score = NodeKind::Text { template: "W:{wins} L:{losses}".into(), size: None };
+    config.cards.push(card(
+        "score",
+        vec![
+            plugin_node(1, "counter", "counted", serde_json::json!({})),
+            current(2, "Wins"),
+            current(3, "Losses"),
+            protocol::cards::Node { id: 4, x: 0.0, y: 0.0, kind: score },
+            alert_node(5, "unused"),
+        ],
+        vec![
+            wire((1, "event"), (5, "trigger")),
+            wire((2, "count"), (4, "wins")),
+            wire((3, "count"), (4, "losses")),
+            wire((4, "text"), (5, "message")),
+        ],
+    ));
     let mut app = App::start("plugin_value_nodes_give_their_values", config).await;
     install_plugin(&app, "examples/plugins/bits-to-money");
+    install_plugin(&app, "examples/plugins/counter");
     app.restart().await;
-    app.wait_running(&["bits-to-money"]).await;
+    app.wait_running(&["bits-to-money", "counter"]).await;
 
     let mut overlay = app.overlay(vec![]).await;
     let mut control = app.control().await;
     control.send(&ControlRequest::Event { name: "money".into(), data: Default::default() }).await;
     assert_eq!(overlay.next_alert().await, "$5.00");
+    for (name, expected) in [("Wins", "W:1 L:0"), ("Losses", "W:1 L:1"), ("Wins", "W:2 L:1")] {
+        control.send(&ControlRequest::Event { name: name.into(), data: Default::default() }).await;
+        assert_eq!(overlay.next_alert().await, expected);
+    }
 
     // Tested from the panel, with the test cheer's bits; the editor shows
     // the value node with its outputs.
@@ -289,4 +319,176 @@ async fn server_code_cant_reach_the_app_itself() {
     // The tool, on another port of this PC, answers.
     check("fetch", format!("http://127.0.0.1:{tool}/")).await;
     assert_eq!(overlay.next_alert().await, "fetch: status 200");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs a browser and built panel; run with `cargo e2e`"]
+async fn plugins_tabs_talk_to_their_server_code_and_fold_under_more() {
+    let mut config = test_config();
+    // The Counter example's Count, from a Custom event.
+    config.cards.push(card(
+        "hugs",
+        vec![
+            custom("hug"),
+            plugin_node(2, "counter", "count", serde_json::json!({ "counter": "Hugs", "show": false })),
+        ],
+        vec![wire((1, "event"), (2, "trigger"))],
+    ));
+    // Its Counted, from the card or the tab, as an alert.
+    config.cards.push(card(
+        "counted",
+        vec![plugin_node(1, "counter", "counted", serde_json::json!({})), alert_node(2, "unused")],
+        vec![wire((1, "event"), (2, "trigger")), wire((1, "summary"), (2, "message"))],
+    ));
+    config.plugins.insert(
+        "host-check".into(),
+        protocol::config::PluginConfig { hosts: vec!["127.0.0.1".into()], ..Default::default() },
+    );
+    let mut app = App::start("plugins_tabs_talk_to_their_server_code_and_fold_under_more", config).await;
+    install_plugin(&app, "examples/plugins/counter");
+    install_plugin(&app, "crates/e2e/plugins/host-check");
+    app.restart().await;
+    app.wait_running(&["counter", "host-check"]).await;
+    let mut overlay = app.overlay(vec![]).await;
+    let mut control = app.control().await;
+
+    // At full width every tab fits: the plugins' after Activity, by the
+    // plugins' names (Counter, Host check).
+    let panel = Panel::open(&app, "cards").await;
+    let row =
+        "[...document.querySelectorAll('.dock-header nav.tabs > a.tab')].map(tab => tab.textContent).join()";
+    panel
+        .wait("the plugins' tabs", &format!("{row} === 'Cards,Activity,Counters,Checks,Plugins,Test,Status'"))
+        .await;
+    assert_eq!(panel.count("#tabs-more").await, 0, "no ⋯ while everything fits");
+
+    // The Counter's tab: its page asks for the counts when it opens, and
+    // shows a card's count as it happens.
+    let counter = "/plugins/counter/tab.html";
+    panel.click(".dock-header a.tab[href='#/tab/counter']").await;
+    panel
+        .wait(
+            "the Counters tab",
+            "location.hash === '#/tab/counter' && !!document.querySelector('#tab-page')",
+        )
+        .await;
+    panel
+        .wait_in_frame(counter, "its empty list", "document.body.innerText.includes('Nothing counted yet.')")
+        .await;
+    control.send(&ControlRequest::Event { name: "hug".into(), data: Default::default() }).await;
+    let count = "document.querySelector('.count')?.textContent";
+    panel.wait_in_frame(counter, "the card's count", &format!("{count} === '1'")).await;
+    assert_eq!(overlay.next_alert().await, "Hugs: 1");
+    // Its + goes to the server code, which counts, fires Counted as a
+    // card's count does, and answers.
+    panel
+        .eval_in_frame::<serde_json::Value>(
+            counter,
+            "document.querySelector('[aria-label=\"One more Hugs\"]').click()",
+        )
+        .await;
+    panel.wait_in_frame(counter, "one more", &format!("{count} === '2'")).await;
+    assert_eq!(overlay.next_alert().await, "Hugs: 2");
+    control.send(&ControlRequest::Event { name: "hug".into(), data: Default::default() }).await;
+    panel.wait_in_frame(counter, "the card counting on from there", &format!("{count} === '3'")).await;
+    assert_eq!(overlay.next_alert().await, "Hugs: 3");
+    // Add counter: a name and Enter, and the new counter shows at 0, after
+    // the others, without firing Counted (the next alert is its first
+    // count).
+    panel.eval_in_frame::<serde_json::Value>(counter, "document.getElementById('add-counter').click()").await;
+    panel
+        .eval_in_frame::<serde_json::Value>(
+            counter,
+            "const name = document.getElementById('add-name'); name.value = 'Deaths'; \
+             name.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))",
+        )
+        .await;
+    let rows = "[...document.querySelectorAll('#counters .row')]\
+        .map(row => `${row.querySelector('.name').textContent} ${row.querySelector('.count').textContent}`).join()";
+    panel.wait_in_frame(counter, "the new counter", &format!("{rows} === 'Hugs 3,Deaths 0'")).await;
+    panel
+        .wait_in_frame(
+            counter,
+            "the name field closed",
+            "document.getElementById('add-form').hidden && !document.getElementById('add-counter').hidden",
+        )
+        .await;
+    panel
+        .eval_in_frame::<serde_json::Value>(
+            counter,
+            "document.querySelector('[aria-label=\"One more Deaths\"]').click()",
+        )
+        .await;
+    assert_eq!(overlay.next_alert().await, "Deaths: 1");
+
+    // Host check's tab counts: its page sends 3, its code puts 3 on the
+    // tab and answers.
+    let checks = "/plugins/host-check/tab.html";
+    panel.click(".dock-header a.tab[href='#/tab/host-check']").await;
+    panel.wait_in_frame(checks, "its page", "typeof send === 'function'").await;
+    panel.eval_in_frame::<serde_json::Value>(checks, "send(3)").await;
+    panel
+        .wait_in_frame(
+            checks,
+            "the answer",
+            "document.getElementById('heard').textContent === '{\"count\":3}'",
+        )
+        .await;
+    let checks_tab = "document.querySelector(\".dock-header a.tab[href='#/tab/host-check']\")?.textContent";
+    panel.wait("the count on its tab", &format!("{checks_tab} === 'Checks (3)'")).await;
+
+    // In the dock, what doesn't fit goes under ⋯ from the row's end; Cards
+    // and Activity stay, and nothing runs off the edge. (Counters fits;
+    // Checks, with room kept for a two-digit count, doesn't.)
+    panel.resize(380, 800).await;
+    panel.wait("⋯", "!!document.querySelector('#tabs-more')").await;
+    panel.wait("the row in the dock", &format!("{row} === 'Cards,Activity,Counters'")).await;
+    let fits: bool = panel
+        .eval(
+            "(() => { const nav = document.querySelector('.dock-header nav.tabs');              return nav.scrollWidth <= nav.clientWidth && document.documentElement.scrollWidth <= innerWidth; })()",
+        )
+        .await;
+    assert!(fits, "the row runs off the edge");
+    assert_eq!(panel.count("#tabs-more.current").await, 1, "the tab shown is under ⋯");
+    assert_eq!(panel.count("#tabs-more .more-dot").await, 1, "a count is under ⋯");
+    panel.click("#tabs-more").await;
+    let menu = "[...document.querySelectorAll('.tabs-menu .menu-item')].map(item => item.textContent).join()";
+    panel.wait("⋯'s menu", &format!("{menu} === 'Checks (3),Plugins,Test,Status'")).await;
+    assert_eq!(
+        panel.count(".tabs-menu .menu-sep").await,
+        1,
+        "a line between the plugins' tabs and the app's"
+    );
+    assert_eq!(panel.count(".tabs-menu .menu-item[aria-current='page']").await, 1, "the tab shown, marked");
+    panel.click(".tabs-menu .menu-item[href='#/status']").await;
+    panel
+        .wait("Status, from ⋯", "location.hash === '#/status' && !document.querySelector('.tabs-menu')")
+        .await;
+    assert_eq!(panel.count("#tabs-more.current").await, 1, "Status is under ⋯ too");
+
+    // Its hosts taken back, Host check's code stops: its tab says so, and
+    // its count goes.
+    panel.resize(1400, 900).await;
+    panel.go("plugins/host-check").await;
+    panel.click("#plugin-host-check-disallow").await;
+    panel.go("tab/host-check").await;
+    panel
+        .wait(
+            "the notice",
+            "document.querySelector('#tab-not-running')?.innerText.includes(\"Host check isn't running: see Plugins.\")",
+        )
+        .await;
+    panel.wait("its count gone", &format!("{checks_tab} === 'Checks'")).await;
+
+    // Switched off, the Counter's tab goes, and a link to it opens its box.
+    control.send(&ControlRequest::Plugin { id: "counter".into(), set: Switch::Off }).await;
+    panel
+        .wait(
+            "the Counters tab gone",
+            "!document.querySelector(\".dock-header a.tab[href='#/tab/counter']\")",
+        )
+        .await;
+    panel.go("tab/counter").await;
+    panel.wait("its box", "location.hash === '#/plugins/counter'").await;
+    panel.close().await;
 }

@@ -31,9 +31,11 @@ pub struct Effects {
     plugins: std::collections::BTreeMap<String, config::PluginConfig>,
     /// The plugins whose pages hear the chat (on, and allowed to).
     chat_listeners: Vec<String>,
-    /// The plugins whose server code hears the chat (on, and allowed to).
+    /// The plugins whose server code or program hears the chat (on, and
+    /// allowed to).
     chat_hearers: Vec<String>,
-    /// The plugins whose server code hears events (on, and allowed to).
+    /// The plugins whose server code or program hears events (on, and
+    /// allowed to).
     event_hearers: Vec<String>,
     /// The plugins with server code: it plays their queued runs.
     servers: std::collections::BTreeSet<String>,
@@ -97,8 +99,9 @@ impl Effects {
     }
 
     /// From the plugins in `catalog`: those whose pages and those whose
-    /// server code hear the chat or events (on, with a page or server code,
-    /// and allowed to hear it), and those with server code.
+    /// server code or program hear the chat or events (on, with a page,
+    /// server code or a program, and allowed to hear it), and those with
+    /// server code.
     pub fn with_catalog(mut self, catalog: &protocol::plugin::Catalog) -> Effects {
         self.servers = catalog
             .plugins()
@@ -111,7 +114,8 @@ impl Effects {
                 .plugins()
                 .iter()
                 .filter(|info| {
-                    (if page { info.overlay } else { info.server }) && !self.plugin_off(&info.manifest.id)
+                    (if page { info.overlay } else { info.server || info.program })
+                        && !self.plugin_off(&info.manifest.id)
                 })
                 .filter(|info| {
                     let allowed = self.plugins.get(&info.manifest.id).map(|stored| stored.hears.as_slice());
@@ -128,8 +132,8 @@ impl Effects {
         Effects { chat_listeners, chat_hearers, event_hearers, ..self }
     }
 
-    /// An event, for the server code that hears events (`on-event`), as
-    /// the built-in event node it's for has it. Plugins' own events and
+    /// An event, for the server code (`on-event`) or program that hears
+    /// events, as the built-in event node it's for has it. Plugins' own events and
     /// chat messages (heard as chat) aren't.
     pub fn hear_event(
         &self,
@@ -254,7 +258,7 @@ impl Effects {
             let mut settings = shared_settings(
                 &ty.preset_settings,
                 &stored.preset(id.unwrap_or_default()).settings,
-                &mut |kind, folder| ctx.media.pick(kind, folder, rng),
+                &mut |kind, folder, every| ctx.media.pick_files(kind, folder, every, rng),
             );
             settings.extend(changes.clone());
             settings
