@@ -469,7 +469,7 @@ mod tests {
         assert!(!is_newer("0.1.0", "0.1.0"));
         assert!(!is_newer("0.1.0", "0.2.0"), "an older one isn't offered");
         assert!(!is_newer("v0.2.0", "0.1.0"), "not semver");
-        assert!(is_newer("0.2.0", RUNNING) || !is_newer(RUNNING, "0.2.0"));
+        assert!(is_newer(RUNNING, "0.0.0"), "the app's own version is semver");
     }
 
     fn temp_dir(name: &str) -> PathBuf {
