@@ -29,7 +29,15 @@ impl Guest for Counter {
         host::log(Level::Info, "ready to count");
     }
 
-    fn run(node: String, _input: String, values: Vec<NamedValue>, _run: Option<u64>, _queue_id: Option<u64>) {
+    fn run(
+        node: String,
+        _input: String,
+        values: Vec<NamedValue>,
+        _viewer: Option<Viewer>,
+        _run: Option<u64>,
+        _queue_id: Option<u64>,
+        _origin: RunOrigin,
+    ) {
         if node != "count" {
             return;
         }
@@ -116,6 +124,9 @@ impl Guest for Counter {
     fn on_timer(_id: u32) {}
 
     fn on_response(_id: u32, _response: Result<Response, String>) {}
+
+    /// It doesn't moderate.
+    fn on_moderated(_id: u32, _done: Result<(), String>) {}
 
     fn on_socket(_id: u32, _event: SocketEvent) {}
 

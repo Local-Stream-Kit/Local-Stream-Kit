@@ -652,6 +652,9 @@ fn check(
     if manifest.hears.iter().any(|what| what == protocol::plugin::HEARS_EVENTS) && !server {
         problems.push(format!("it hears events, which only {SERVER_FILE} hears"));
     }
+    if manifest.moderates && !server {
+        problems.push(format!("it moderates, which only {SERVER_FILE} does"));
+    }
     if has(Category::Values) && !server {
         problems.push(format!("it has value nodes but no {SERVER_FILE} to work their values out"));
     }
@@ -786,17 +789,23 @@ mod tests {
         write(&dir, "events/plugin.json", &events);
         write(&dir, "served/plugin.json", &events.replace(r#""id": "events""#, r#""id": "served""#));
         write(&dir, "served/server.wasm", "not really");
+        // Only server code moderates.
+        let moderates =
+            CONFETTI.replace("\"confetti\"", "\"mods\"").replacen('{', "{ \"moderates\": true,", 1);
+        write(&dir, "mods/plugin.json", &moderates);
+        write(&dir, "mods/overlay/index.html", "<!doctype html>");
 
         let plugins = Plugins::load_from(&dir, false);
         assert_eq!(plugins.pages(), ["confetti"]);
         assert!(plugins.catalog().node_type("confetti", "burst").is_some());
         let failures = plugins.failures();
         let failed: Vec<&str> = failures.iter().map(|failure| failure.folder.as_str()).collect();
-        assert_eq!(failed, ["broken", "events", "other"]);
+        assert_eq!(failed, ["broken", "events", "mods", "other"]);
         assert!(plugins.failures()[1].problems[0].contains("no server.wasm to fire them"));
+        assert_eq!(plugins.failures()[2].problems, ["it moderates, which only server.wasm does"]);
         assert!(plugins.servers().iter().any(|plugin| plugin.manifest.id == "served"));
         assert!(plugins.server_file("served").is_some());
-        let other = &plugins.failures()[2].problems;
+        let other = &plugins.failures()[3].problems;
         assert!(other.iter().any(|problem| problem.contains("folder is named")), "{other:?}");
         assert!(other.iter().any(|problem| problem.contains("no overlay/index.html")), "{other:?}");
 
@@ -841,11 +850,13 @@ mod tests {
             );
         }
         assert!(plugins.overlay_file("media", "../plugin.json").is_none());
-        // OBS's server code is built from its crate (`cargo dist`, `cargo
-        // e2e`) into its folder.
+        // OBS's and Moderation's server code is built from their crates
+        // (`cargo dist`, `cargo e2e`) into their folders.
         let servers: Vec<String> = plugins.servers().into_iter().map(|plugin| plugin.manifest.id).collect();
-        assert_eq!(servers, ["obs"]);
-        assert!(plugins.server_file("obs").is_some_and(|wasm| wasm.starts_with(b"\0asm")));
+        assert_eq!(servers, ["moderation", "obs"]);
+        for id in ["moderation", "obs"] {
+            assert!(plugins.server_file(id).is_some_and(|wasm| wasm.starts_with(b"\0asm")), "{id}");
+        }
     }
 
     #[test]

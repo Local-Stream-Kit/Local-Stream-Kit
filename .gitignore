@@ -5,6 +5,7 @@
 /crates/server/plugins/alert/overlay/
 /crates/server/plugins/chat/overlay/
 /crates/server/plugins/obs/server.wasm
+/crates/server/plugins/moderation/server.wasm
 /cache/
 /lsk.json
 /lsk.json.tmp

@@ -615,6 +615,7 @@ async fn handle(request: PanelRequest, panel: &PanelState) -> Option<PanelEvent>
                             queue_id: None,
                             run_id: None,
                             preview: None,
+                            origin: ItemOrigin::Test,
                         };
                         hub.send(protocol::Command::Plugin(protocol::PluginCommand {
                             plugin: SPEAK_PLUGIN.into(),
@@ -676,6 +677,7 @@ async fn handle(request: PanelRequest, panel: &PanelState) -> Option<PanelEvent>
                     queue_id: None,
                     run_id: None,
                     preview: None,
+                    origin: ItemOrigin::Test,
                 };
                 panel.hub.send(protocol::Command::Plugin(protocol::PluginCommand { plugin, message }));
             }
@@ -771,6 +773,20 @@ async fn handle(request: PanelRequest, panel: &PanelState) -> Option<PanelEvent>
                 tracing::warn!("couldn't open the logs folder ({error}); it's {}", folder.display());
             }
             None
+        }
+        PanelRequest::ExportCard { card } => {
+            let name = format!("{}.json", crate::desktop::file_name(&card.name, "Card"));
+            let file = protocol::cards::CardFile::new(card).to_json();
+            match panel.desktop.download(&name, file.as_bytes()) {
+                Ok(path) => {
+                    tracing::info!(path = %path.display(), "exported a card");
+                    None
+                }
+                Err(error) => {
+                    tracing::warn!("couldn't export a card: {error}");
+                    Some(PanelEvent::ExportFailed { message: error })
+                }
+            }
         }
         PanelRequest::ClearLogLines => {
             panel.log.clear_recent();

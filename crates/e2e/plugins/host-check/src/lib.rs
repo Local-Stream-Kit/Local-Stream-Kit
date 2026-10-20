@@ -7,7 +7,8 @@ use std::cell::RefCell;
 
 use lsk::plugin::host;
 use lsk::plugin::types::{
-    Audio, Choice, EventValue, Level, NamedEventValue, Request, StatusLevel, Text, TextPart, Value,
+    Audio, Choice, EventValue, Level, Moderation, NamedEventValue, Request, StatusLevel, Text, TextPart,
+    Value,
 };
 
 thread_local! {
@@ -49,7 +50,15 @@ struct HostCheck;
 impl Guest for HostCheck {
     fn start() {}
 
-    fn run(node: String, _input: String, values: Vec<NamedValue>, run: Option<u64>, queue_id: Option<u64>) {
+    fn run(
+        node: String,
+        _input: String,
+        values: Vec<NamedValue>,
+        _viewer: Option<Viewer>,
+        run: Option<u64>,
+        queue_id: Option<u64>,
+        _origin: RunOrigin,
+    ) {
         // Hold: waits in the queue; done after 50 ms, or held until it's
         // skipped (`until` "skip").
         if node == "hold" {
@@ -116,6 +125,11 @@ impl Guest for HostCheck {
                 host::set_choices("picks", &[choice("one", "One"), choice("two-v", "Two")]);
                 report("choices", "set");
             }
+            // Its plugin.json doesn't say it moderates.
+            "moderate" => match host::moderate("twitch", &Moderation::Ban("1001".into())) {
+                Ok(id) => wait(id, "moderate"),
+                Err(error) => report("moderate", &format!("refused: {error}")),
+            },
             // A note on its Plugins box itself (no setting).
             "note" => {
                 host::set_note("", StatusLevel::Problem, &["The avatar didn't load".into(), "Try another".into()]);
@@ -258,6 +272,14 @@ impl Guest for HostCheck {
         let what = waited(id);
         match response {
             Ok(response) => report(&what, &format!("status {}", response.status)),
+            Err(error) => report(&what, &format!("failed: {error}")),
+        }
+    }
+
+    fn on_moderated(id: u32, done: Result<(), String>) {
+        let what = waited(id);
+        match done {
+            Ok(()) => report(&what, "done"),
             Err(error) => report(&what, &format!("failed: {error}")),
         }
     }

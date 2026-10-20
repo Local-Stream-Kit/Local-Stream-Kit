@@ -7,15 +7,17 @@
 //! a time ([`Call`]): `start`, its effect nodes' runs, what cards ask its
 //! flow and value nodes, the chat and events it hears, its event nodes on
 //! the cards, what its tab in the panel sends, timers, web answers, socket
-//! messages, and messages to read aloud in its voices. The app does every bit of waiting (timers, web
-//! requests, sockets) on its own tasks and hands the results back as calls,
+//! messages, messages to read aloud in its voices, and the answers to its
+//! moderating. The app does every bit of waiting (timers, web requests,
+//! sockets, Twitch) on its own tasks and hands the results back as calls,
 //! so a plugin never blocks and needs no async.
 //!
 //! The sandbox: WASI without files or network (stdout and stderr go to the
 //! app's console), web requests and WebSockets only to the hosts in the
 //! plugin's manifest (redirects too) and never to the app itself
-//! ([`super::net`]), a time limit per call, a memory limit, and limits on
-//! timers and sockets. A plugin that breaks one of
+//! ([`super::net`]), moderating only with the user's Allow, a time limit
+//! per call, a memory limit, and limits on timers, sockets and moderations
+//! waiting for an answer. A plugin that breaks one of
 //! them, or crashes, is stopped (see [`Plugins::stop`]); everything else
 //! keeps running.
 
@@ -24,6 +26,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+use protocol::activity::ItemOrigin;
 use protocol::cards::{Category, SocketType};
 use protocol::config::AppConfig;
 use protocol::plugin::{EmoteValue, PluginCommand, PluginInfo, PluginMessage, TextPart, TextValue};
@@ -56,8 +59,8 @@ use bindings::*;
 
 use lsk::plugin::types::{
     Audio, ChatLine, ChatMarks, Computed, Emote, EventValue, Header, HeardChat, HeardEvent, Level,
-    NamedEventValue, PlacedNode, RemovedViewer, Request, Roles, Route, StatusLevel, Text,
-    TextPart as WitPart, Value,
+    Moderation, NamedEventValue, PlacedNode, RemovedViewer, Request, Roles, Route, StatusLevel, Text,
+    TextPart as WitPart, Timeout, Value,
 };
 
 /// The provider a server plugin's events come from.
@@ -73,6 +76,8 @@ const TABLE_ELEMENTS_LIMIT: usize = 100_000;
 const MAX_TIMERS: usize = 100;
 const MIN_TIMER_MS: u32 = 10;
 const MAX_SOCKETS: usize = 8;
+/// Moderations waiting for Twitch's answer, at most.
+const MAX_MODERATING: usize = 20;
 const FETCH_TIMEOUT: Duration = Duration::from_secs(30);
 /// Everything a plugin stores, together.
 const MAX_STORED: usize = 1024 * 1024;
@@ -105,6 +110,9 @@ pub struct Deps {
     pub media: crate::media::MediaFolders,
     /// What plugins' tabs in the panel send their code, and back.
     pub tabs: super::tabs::PluginTabs,
+    /// For plugins that moderate the chat; none without a Twitch login to
+    /// wait for (replaying a recording, the Twitch CLI).
+    pub moderation: Option<crate::providers::twitch_eventsub::TwitchModeration>,
 }
 
 /// Runs the server code of every plugin that's on and whose hosts are
@@ -338,6 +346,7 @@ enum Call {
         values: Map<String, Json>,
         run_id: Option<u64>,
         queue_id: Option<u64>,
+        origin: ItemOrigin,
     },
     /// The queued run on stage was skipped.
     Skip(u64),
@@ -356,6 +365,8 @@ enum Call {
     NodesChanged(Vec<Placed>),
     /// A message from its tab in the panel, as JSON.
     Tab(String),
+    /// Twitch's answer to one of its `moderate` calls.
+    Moderated(u32, Result<(), String>),
 }
 
 /// What a plugin's server code listens to from the moment [`follow`]
@@ -540,12 +551,13 @@ fn run_call(envelope: &Envelope, plugin: &str) -> Option<Call> {
         return None;
     }
     match &command.message {
-        PluginMessage::Run { node, input, values, run_id, queue_id, .. } => Some(Call::Run {
+        PluginMessage::Run { node, input, values, run_id, queue_id, origin, .. } => Some(Call::Run {
             node: node.clone(),
             input: input.clone(),
             values: values.clone(),
             run_id: *run_id,
             queue_id: *queue_id,
+            origin: *origin,
         }),
         PluginMessage::Skip { queue_id } => Some(Call::Skip(*queue_id)),
         _ => None,
@@ -626,9 +638,30 @@ impl Running {
     fn handle(&mut self, call: Call, asks: &Asks) -> Result<(), String> {
         match call {
             Call::Stop => Ok(()),
-            Call::Run { node, input, values, run_id, queue_id } => {
+            Call::Run { node, input, mut values, run_id, queue_id, origin } => {
+                // Its `viewer`, for a node that asks for it, as a viewer.
+                let viewer = self
+                    .store
+                    .data()
+                    .viewers
+                    .contains(&node)
+                    .then(|| values.remove(protocol::plugin::VIEWER_VALUE))
+                    .flatten()
+                    .and_then(|viewer| serde_json::from_value(viewer).ok())
+                    .map(viewer_of);
                 let values = named_values(&values);
-                self.call(|plugin, store| plugin.call_run(store, &node, &input, &values, run_id, queue_id))
+                self.call(|plugin, store| {
+                    plugin.call_run(
+                        store,
+                        &node,
+                        &input,
+                        &values,
+                        viewer.as_ref(),
+                        run_id,
+                        queue_id,
+                        origin_of(origin),
+                    )
+                })
             }
             Call::Asked(Asked::Route { node, input, values, viewer, run, origin }) => {
                 let values = named_values(&values);
@@ -693,6 +726,12 @@ impl Running {
             }
             Call::Skip(queue_id) => self.call(|plugin, store| plugin.call_skip(store, queue_id)),
             Call::Tab(json) => self.call(|plugin, store| plugin.call_on_tab(store, &json)),
+            Call::Moderated(id, done) => {
+                let state = self.store.data_mut();
+                state.moderating = state.moderating.saturating_sub(1);
+                let done = done.as_ref().map(|_| ()).map_err(String::as_str);
+                self.call(|plugin, store| plugin.call_on_moderated(store, id, done))
+            }
             Call::SettingsChanged => self.call(|plugin, store| plugin.call_settings_changed(store)),
             Call::Timer(id) => {
                 // A one-off timer is done once it fires.
@@ -922,6 +961,12 @@ struct State {
     flows: Vec<NodeType>,
     /// Its value nodes.
     values: Vec<NodeType>,
+    /// Its effect nodes whose runs bring the viewer (`"viewer": true`).
+    viewers: Vec<String>,
+    /// For whether it may moderate ([`protocol::plugin::moderates_now`]).
+    info: PluginInfo,
+    /// Its moderations waiting for Twitch's answer.
+    moderating: usize,
     /// Flow nodes' runs it answers later (`route-later`).
     later: Pending,
     /// Value nodes' runs it answers later (`compute-later`).
@@ -1003,6 +1048,15 @@ impl State {
                 .filter(|node| node.category == Category::Values)
                 .cloned()
                 .collect(),
+            viewers: info
+                .manifest
+                .nodes
+                .iter()
+                .filter(|node| node.category == Category::Effects && node.viewer)
+                .map(|node| node.id.clone())
+                .collect(),
+            info: info.clone(),
+            moderating: 0,
             later: Pending::default(),
             later_values: Pending::default(),
             placed: HashMap::new(),
@@ -1457,6 +1511,36 @@ impl lsk::plugin::host::Host for State {
         self.stored.get(&key).cloned()
     }
 
+    fn moderate(&mut self, platform: String, what: Moderation) -> Result<u32, String> {
+        let allowed = self.deps.config.borrow().plugin(&self.id).moderates;
+        if !protocol::plugin::moderates_now(&self.info, allowed) {
+            return Err(if self.info.manifest.moderates {
+                "It may not moderate yet: press Allow on its Plugins box.".into()
+            } else {
+                "Its plugin.json doesn't say it moderates (\"moderates\": true).".into()
+            });
+        }
+        let (user, action) = viewer_action(&platform, what)?;
+        let moderation = self.deps.moderation.clone().ok_or(LOGGED_OUT)?;
+        moderation.ready()?;
+        if self.moderating >= MAX_MODERATING {
+            return Err(format!("{MAX_MODERATING} moderations are waiting for Twitch already."));
+        }
+        self.moderating += 1;
+        let (id, calls, plugin) = (self.next_id(), self.calls.clone(), self.id.clone());
+        self.deps.runtime.spawn(async move {
+            let done = moderation.act(&user, &action).await.map(drop);
+            match &done {
+                Ok(()) => tracing::info!(plugin, viewer = user, ?action, "moderated a viewer"),
+                Err(why) => {
+                    tracing::info!(plugin, viewer = user, ?action, "couldn't moderate a viewer: {why}")
+                }
+            }
+            let _ = calls.send(Call::Moderated(id, done));
+        });
+        Ok(id)
+    }
+
     fn set(&mut self, key: String, value: Option<String>) {
         let changed = match value {
             Some(value) => {
@@ -1563,6 +1647,36 @@ async fn socket(
     // (A message too big leaves it open on the other end.)
     let _ = socket.close(None).await;
     heard(SocketEvent::Closed(reason));
+}
+
+const LOGGED_OUT: &str = "Log in with Twitch on Status to moderate.";
+
+/// What `host.moderate` asks, as the viewers' cards ask it: the viewer's id
+/// (none to delete a message) and what to do. Only Twitch's chat, so far.
+fn viewer_action(
+    platform: &str,
+    what: Moderation,
+) -> Result<(String, protocol::viewers::ViewerAction), String> {
+    use protocol::viewers::{MAX_TIMEOUT_SECS, ViewerAction};
+    if platform != "twitch" {
+        return Err(format!("Only Twitch's chat can be moderated, not {platform:?}'s."));
+    }
+    let someone = |viewer: String| {
+        if viewer.trim().is_empty() { Err("No viewer: their id is empty.".to_string()) } else { Ok(viewer) }
+    };
+    Ok(match what {
+        Moderation::Timeout(Timeout { viewer, seconds }) => {
+            (someone(viewer)?, ViewerAction::Timeout { secs: seconds.clamp(1, MAX_TIMEOUT_SECS) })
+        }
+        Moderation::Ban(viewer) => (someone(viewer)?, ViewerAction::Ban),
+        Moderation::Delete(line) => {
+            let message = line
+                .strip_prefix("twitch:")
+                .filter(|id| !id.is_empty())
+                .ok_or("Only a message from Twitch's chat can be deleted (a chat line's id: twitch:…).")?;
+            (String::new(), ViewerAction::Delete { message: message.to_string() })
+        }
+    })
 }
 
 /// A status's (or note's) colour, as the panel has it.
@@ -1712,6 +1826,29 @@ mod tests {
         assert!(matches!(heard.recv().await, Some(SocketEvent::Opened)));
         let Some(SocketEvent::Closed(why)) = heard.recv().await else { panic!("closed") };
         assert!(why.contains("too long"), "{why}");
+    }
+
+    #[test]
+    fn moderating_asks_as_the_viewers_cards_do() {
+        use protocol::viewers::ViewerAction;
+        let timeout = |seconds| Moderation::Timeout(Timeout { viewer: "1001".into(), seconds });
+        assert_eq!(
+            viewer_action("twitch", timeout(10)),
+            Ok(("1001".to_string(), ViewerAction::Timeout { secs: 10 }))
+        );
+        assert_eq!(viewer_action("twitch", timeout(0)).unwrap().1, ViewerAction::Timeout { secs: 1 });
+        assert_eq!(
+            viewer_action("twitch", timeout(u32::MAX)).unwrap().1,
+            ViewerAction::Timeout { secs: protocol::viewers::MAX_TIMEOUT_SECS }
+        );
+        assert_eq!(viewer_action("twitch", Moderation::Ban("1001".into())).unwrap().1, ViewerAction::Ban);
+        assert!(viewer_action("twitch", Moderation::Ban(" ".into())).is_err(), "nobody");
+        assert_eq!(
+            viewer_action("twitch", Moderation::Delete("twitch:abc-123".into())),
+            Ok((String::new(), ViewerAction::Delete { message: "abc-123".into() }))
+        );
+        assert!(viewer_action("twitch", Moderation::Delete("local:4".into())).is_err(), "not Twitch's line");
+        assert!(viewer_action("youtube", Moderation::Ban("1001".into())).is_err(), "only Twitch so far");
     }
 
     #[test]

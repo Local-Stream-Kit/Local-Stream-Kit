@@ -1,0 +1,15 @@
+[package]
+name = "moderation"
+description = "The built-in Moderation plugin's server code: timeouts and bans from cards, a WebAssembly component"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license-file.workspace = true
+
+# Built for wasm32-wasip2 into crates/server/plugins/moderation/server.wasm
+# by `cargo dist` and `cargo e2e`; on other targets only for its tests.
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+wit-bindgen = "0.62"

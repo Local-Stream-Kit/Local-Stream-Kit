@@ -772,6 +772,110 @@ async fn the_dock_menu_duplicates_and_deletes() {
     panel.close().await;
 }
 
+/// Picks `item` in the card editor's ⋯ menu.
+async fn from_card_menu(panel: &Panel, item: &str) {
+    panel.click(".bar-menu .icon-button").await;
+    panel.wait("the menu", "document.querySelector('.bar-menu-list')").await;
+    panel.click(item).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs a browser and built panel; run with `cargo e2e`"]
+async fn a_card_is_exported_and_imported() {
+    let app = App::start("a_card_is_exported_and_imported", test_config()).await;
+    let panel = open_card(&app, "raid-alert", 2).await;
+    let problem = |text: &str| {
+        format!("document.querySelector('#card-file-problem > span')?.textContent === {}", js_string(text))
+    };
+
+    // With --no-open, Export saves in downloads/ in the app's folder. A
+    // file in its way: it says why.
+    let downloads = app.dir.join("downloads");
+    std::fs::write(&downloads, "").unwrap();
+    from_card_menu(&panel, "#card-export").await;
+    panel
+        .wait(
+            "why it wasn't exported",
+            "document.getElementById('card-file-problem')?.textContent.startsWith(\"Not exported: couldn't make\")",
+        )
+        .await;
+    std::fs::remove_file(&downloads).unwrap();
+
+    // Exported: the card as shown, named after it, and shown in Explorer
+    // (logged). Trying again closes the problem.
+    from_card_menu(&panel, "#card-export").await;
+    panel.wait("the problem closed", "!document.getElementById('card-file-problem')").await;
+    app.wait_logged("the export", 1, |line| line.contains("exported a card")).await;
+    let file = downloads.join("Raid alert.json");
+    let text = std::fs::read_to_string(&file).expect("the exported card");
+    let original = card(&app.saved_config(), "raid-alert").clone();
+    assert_eq!(protocol::cards::CardFile::parse(&text), Ok(original.clone()));
+    assert!(
+        app.log_lines().iter().any(|line| line.contains("not opened") && line.contains("Raid alert.json")),
+        "shown in Explorer"
+    );
+
+    // The editor's menu has no Import: that's on New card.
+    panel.click(".bar-menu .icon-button").await;
+    panel.wait("the menu", "document.querySelector('.bar-menu-list')").await;
+    let items: Vec<String> = panel
+        .eval("[...document.querySelectorAll('.bar-menu-list .menu-item')].map(b => b.textContent)")
+        .await;
+    assert_eq!(items, ["Duplicate", "Export", "Delete"]);
+    assert_eq!(panel.count("#card-import").await, 0);
+
+    // New card's Import picks a file.
+    panel.go("new").await;
+    panel.wait("New card", "document.getElementById('new-card-import')").await;
+    panel.run("document.getElementById('card-import').click = () => { window.picking = true; }").await;
+    panel.click("#new-card-import").await;
+    assert!(panel.eval::<bool>("window.picking === true").await, "the file picker opens");
+
+    // Imported: a new card at the end, as new cards go, on, and its
+    // editor opens.
+    panel.choose_file("#card-import", &file).await;
+    panel.wait("the imported card's editor", "location.hash === '#/card/raid-alert-2'").await;
+    let config = app
+        .wait_for_config("the imported card", |config| {
+            config.cards.last().is_some_and(|card| card.id == "raid-alert-2")
+        })
+        .await;
+    let imported = card(&config, "raid-alert-2");
+    assert_eq!(
+        (imported.name.as_str(), imported.enabled, &imported.nodes, &imported.wires),
+        ("Raid alert", true, &original.nodes, &original.wires)
+    );
+
+    // Not a card, or from a newer version: it says so, until closed (or
+    // the next try), and nothing's imported.
+    panel.go("new").await;
+    panel.wait("New card", "document.getElementById('new-card-import')").await;
+    let notes = app.dir.join("notes.json");
+    std::fs::write(&notes, "{}").unwrap();
+    panel.choose_file("#card-import", &notes).await;
+    panel.wait("why it wasn't imported", &problem("Not imported: “notes.json” isn't a card.")).await;
+    panel.click("#card-file-problem .notice-close").await;
+    panel.wait("the problem closed", "!document.getElementById('card-file-problem')").await;
+    let newer = app.dir.join("newer.json");
+    std::fs::write(&newer, text.replacen("\"version\": 1", "\"version\": 2", 1)).unwrap();
+    panel.choose_file("#card-import", &newer).await;
+    panel
+        .wait(
+            "why it wasn't imported",
+            &problem(
+                "Not imported: “newer.json” is from a newer version. Update Local Stream Kit (Status), then try again.",
+            ),
+        )
+        .await;
+    assert_eq!(app.saved_config().cards.len(), config.cards.len(), "nothing more imported");
+
+    // A card's editor doesn't show New card's problem.
+    panel.go("card/hydrate").await;
+    panel.wait("the card", "document.querySelector('.editor-bar .name').value === 'Hydrate'").await;
+    assert_eq!(panel.count("#card-file-problem").await, 0);
+    panel.close().await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "needs a browser and built panel; run with `cargo e2e`"]
 async fn a_chant_card_tests_with_a_crowd() {
@@ -5223,6 +5327,12 @@ async fn server_code_runs_in_the_app() {
     assert!(blocked.starts_with("blocked: refused: localhost isn't one of the hosts"), "{blocked}");
     check("socket", &format!("ws://{tool}/")).await;
     assert_eq!(overlay.next_alert().await, "socket: opened");
+    // Moderating: only with "moderates" in its plugin.json.
+    check("moderate", "").await;
+    assert_eq!(
+        overlay.next_alert().await,
+        "moderate: refused: Its plugin.json doesn't say it moderates (\"moderates\": true)."
+    );
     // A message for its page; its effect node's runs never go there.
     check("page", "").await;
     let data = overlay

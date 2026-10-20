@@ -228,6 +228,7 @@ mod tests {
                 queue_id: None,
                 run_id: None,
                 preview: None,
+                origin: Default::default(),
             },
         });
         assert_eq!(

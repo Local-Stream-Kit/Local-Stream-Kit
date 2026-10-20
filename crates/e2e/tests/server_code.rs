@@ -1,5 +1,6 @@
 //! Plugins' server code in cards, end to end: flow and value nodes, hearing
-//! the chat and settings on event nodes, and not reaching the app itself.
+//! the chat and settings on event nodes, moderating, and not reaching the
+//! app itself.
 //! Run with `cargo e2e`. (Effect and event nodes, timers, web requests and sockets
 //! are in `panel.rs`, `server_code_runs_in_the_app`.)
 
@@ -245,14 +246,46 @@ async fn server_code_hears_the_chat_and_fires_one_placed_node() {
 
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "needs a browser and built panel; run with `cargo e2e`"]
-async fn the_plugins_page_asks_to_hear_the_chat_and_events() {
-    let mut app = App::start("the_plugins_page_asks_to_hear_the_chat_and_events", test_config()).await;
-    // The Bits to money example, wanting to hear both.
+async fn the_built_in_moderation_times_out_who_set_the_card_off() {
+    // The Vanish preset: Chat command !vanish → Time out, 10 s.
+    let mut config = test_config();
+    let vanish = protocol::cards::presets().into_iter().find(|preset| preset.title == "Vanish").unwrap();
+    config.cards.push((vanish.card)("vanish"));
+    let app = App::start_debug("the_built_in_moderation_times_out_who_set_the_card_off", config).await;
+    app.wait_running(&["moderation"]).await;
+
+    // Tested from the panel: nobody is timed out, the log says who would
+    // have been.
+    let panel = Panel::open(&app, "card/vanish").await;
+    panel.wait("the card's nodes", "document.querySelectorAll('.node').length === 2").await;
+    panel.click("#card-test").await;
+    app.wait_logged("the test", 1, |line| line.contains("A test: would time out TestViewer for 10 s.")).await;
+
+    // From the chat: Twitch is asked with the viewer who wrote it. Not
+    // logged in here, so the Plugins box says why it didn't happen; a
+    // built-in's moderating is allowed already.
+    panel.input(chat("m1", "MossyKnight", "!vanish")).await;
+    panel.go("plugins/moderation").await;
+    panel
+        .wait(
+            "why not",
+            "document.getElementById('plugin-moderation-note')?.innerText.includes(\"Couldn't time out MossyKnight for 10 s: Log in with Twitch on Status to moderate.\")",
+        )
+        .await;
+    assert_eq!(panel.count("#plugin-moderation-moderates").await, 0, "nothing to allow");
+    panel.close().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs a browser and built panel; run with `cargo e2e`"]
+async fn the_plugins_page_asks_to_hear_and_to_moderate() {
+    let mut app = App::start("the_plugins_page_asks_to_hear_and_to_moderate", test_config()).await;
+    // The Bits to money example, wanting to hear both, and to moderate.
     install_plugin(&app, "examples/plugins/bits-to-money");
     let manifest = app.dir.join("plugins").join("bits-to-money").join("plugin.json");
     let text = std::fs::read_to_string(&manifest).unwrap();
-    std::fs::write(&manifest, text.replace("\"api\": 1,", "\"api\": 1, \"hears\": [\"chat\", \"events\"],"))
-        .unwrap();
+    let wants = "\"api\": 1, \"hears\": [\"chat\", \"events\"], \"moderates\": true,";
+    std::fs::write(&manifest, text.replace("\"api\": 1,", wants)).unwrap();
     app.restart().await;
 
     let panel = Panel::open(&app, "plugins/bits-to-money").await;
@@ -272,6 +305,26 @@ async fn the_plugins_page_asks_to_hear_the_chat_and_events() {
             "document.getElementById('plugin-bits-to-money-disallow-hears')?.parentElement.innerText.includes('It hears the chat and events')",
         )
         .await;
+
+    let asked: String =
+        panel.eval("document.getElementById('plugin-bits-to-money-moderates').innerText").await;
+    assert!(
+        asked.contains(
+            "It wants to time out and ban viewers and delete messages, with your Twitch login. It doesn't until you allow it."
+        ),
+        "{asked}"
+    );
+    panel.click("#plugin-bits-to-money-allow-moderates").await;
+    app.wait_for_config("allowed to moderate", |config| config.plugin("bits-to-money").moderates).await;
+    panel
+        .wait(
+            "It moderates the chat",
+            "document.getElementById('plugin-bits-to-money-disallow-moderates')?.parentElement.innerText.includes('It moderates the chat')",
+        )
+        .await;
+    panel.click("#plugin-bits-to-money-disallow-moderates").await;
+    app.wait_for_config("taken back", |config| !config.plugin("bits-to-money").moderates).await;
+    panel.wait("asked again", "document.getElementById('plugin-bits-to-money-allow-moderates')").await;
     panel.close().await;
 }
 

@@ -113,7 +113,16 @@ impl Guest for Copypasta {
     }
 
     /// It has no effect nodes, so it's never asked.
-    fn run(_node: String, _input: String, _values: Vec<NamedValue>, _run: Option<u64>, _queue_id: Option<u64>) {}
+    fn run(
+        _node: String,
+        _input: String,
+        _values: Vec<NamedValue>,
+        _viewer: Option<Viewer>,
+        _run: Option<u64>,
+        _queue_id: Option<u64>,
+        _origin: RunOrigin,
+    ) {
+    }
 
     fn skip(_queue_id: u64) {}
 
@@ -143,6 +152,9 @@ impl Guest for Copypasta {
     fn on_timer(_id: u32) {}
 
     fn on_response(_id: u32, _response: Result<Response, String>) {}
+
+    /// It doesn't moderate.
+    fn on_moderated(_id: u32, _done: Result<(), String>) {}
 
     fn on_socket(_id: u32, _event: SocketEvent) {}
 

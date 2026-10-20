@@ -40,7 +40,8 @@ const WEB: [(&str, &str); 5] = [
 
 /// The built-in plugins' server code: crates built for `wasm32-wasip2`,
 /// with the plugin folder their `server.wasm` goes into.
-const SERVERS: [(&str, &str); 1] = [("obs", "crates/server/plugins/obs")];
+const SERVERS: [(&str, &str); 2] =
+    [("obs", "crates/server/plugins/obs"), ("moderation", "crates/server/plugins/moderation")];
 
 /// The server's feature that builds the Stream Deck plugin's file in, and
 /// the variable that names another file for it than the one

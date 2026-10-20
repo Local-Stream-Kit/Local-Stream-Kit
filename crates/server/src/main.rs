@@ -88,7 +88,8 @@ struct Cli {
     #[arg(long, hide = true, value_name = "BASE64")]
     update_key: Option<String>,
     /// Log what the panel asks to open on this PC (a link, the logs
-    /// folder, the Stream Deck plugin) instead of opening it (for tests).
+    /// folder, the Stream Deck plugin) instead of opening it, and save
+    /// exported cards in `downloads/` here, not in Downloads (for tests).
     #[arg(long, hide = true)]
     no_open: bool,
 }
@@ -259,6 +260,7 @@ async fn main() -> anyhow::Result<()> {
             activity: activity.clone(),
             media: media.clone(),
             tabs: tabs.clone(),
+            moderation: moderation.clone(),
         },
     );
 

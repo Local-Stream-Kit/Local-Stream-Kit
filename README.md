@@ -48,8 +48,9 @@ Program Files), download the new version from its release page instead.
 3. On **Status**, type your Twitch channel. Chat, emotes, bits, subs,
    gifted subs and raids then work without logging in. **Log in with
    Twitch**, with the broadcaster's account, adds channel points, follows,
-   hype trains and, if you tick them first, moderating viewers from their
-   cards in Activity (timeout, ban, warn) and making them VIPs and mods.
+   hype trains and, if you tick them first, moderating viewers (from their
+   cards in Activity: timeout, ban, warn; or from your cards, such as a
+   `!vanish` that times the viewer out) and making them VIPs and mods.
    Twitch is only asked for what's ticked.
 
 ## Setting up OBS

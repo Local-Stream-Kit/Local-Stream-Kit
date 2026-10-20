@@ -1,6 +1,7 @@
 //! Moderating viewers with the broadcaster's login, from their cards in
-//! Activity: timeouts, bans, warnings, shoutouts, VIPs and mods, deleting
-//! a message; and what Twitch says about a viewer (their account's age,
+//! Activity and for plugins that moderate: timeouts, bans, warnings,
+//! shoutouts, VIPs and mods, deleting a message; and what Twitch says about
+//! a viewer (their account's age,
 //! whether they follow, sub, are banned, VIP or a mod).
 //!
 //! The login's token comes from `Auth` (kept fresh while the app runs).
@@ -81,6 +82,11 @@ impl TwitchModeration {
             Access::NewLogin => Err("Moderating needs a new login: Status → Twitch.".into()),
             Access::LoggedOut | Access::OtherChannel { .. } => Err(LOGGED_OUT.into()),
         }
+    }
+
+    /// Whether viewers can be moderated now; else why not.
+    pub fn ready(&self) -> Result<()> {
+        self.token().map(drop)
     }
 
     /// The Twitch account with this id, else this login, if there is one.

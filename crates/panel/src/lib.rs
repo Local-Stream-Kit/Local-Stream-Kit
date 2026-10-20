@@ -3,6 +3,7 @@
 //! node graphs, effects, connections) through the server's WebSocket, shows
 //! live status, logs in to Twitch and fires test events.
 
+mod card_file;
 mod connection;
 mod dropdown;
 mod editor;
@@ -71,6 +72,12 @@ impl Panel {
     /// queue was closed.
     pub fn close_queue_note(&self) {
         self.model.dispatch(Action::QueueNoteClosed);
+    }
+
+    /// Why a card export or import didn't work, for its editor; `None`
+    /// closes it.
+    pub fn card_file_problem(&self, problem: Option<String>) {
+        self.model.dispatch(Action::CardFileProblem(problem));
     }
 
     /// Opens a viewer's card in Activity: by id (a name there, a viewer

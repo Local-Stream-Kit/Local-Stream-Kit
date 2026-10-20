@@ -7,6 +7,7 @@
 
 use std::sync::{Arc, Mutex};
 
+use protocol::activity::ItemOrigin;
 use protocol::plugin::{PluginMessage, RunViewer};
 use protocol::{Command, PluginCommand};
 use serde_json::{Map, Value as Json};
@@ -51,6 +52,7 @@ pub struct Instant {
     /// For its server code to fire the node's own outputs with.
     pub run_id: Option<u64>,
     pub spoken: Option<Spoken>,
+    pub origin: ItemOrigin,
 }
 
 impl<'a> Out<'a> {
@@ -197,7 +199,7 @@ impl<'a> Out<'a> {
 
 impl Live<'_> {
     fn play_now(&self, run: Instant) {
-        let Instant { plugin, node, input, values, changes, settings, run_id, spoken } = run;
+        let Instant { plugin, node, input, values, changes, settings, run_id, spoken, origin } = run;
         let command = move |values| {
             let message = PluginMessage::Run {
                 node,
@@ -208,6 +210,7 @@ impl Live<'_> {
                 queue_id: None,
                 run_id,
                 preview: None,
+                origin,
             };
             Command::Plugin(PluginCommand { plugin, message })
         };

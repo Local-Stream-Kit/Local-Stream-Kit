@@ -51,6 +51,10 @@ pub const OVERLAY_DIR: &str = "overlay";
 /// Twitch's events are with Twitch's.
 pub const OBS_PLUGIN: &str = "obs";
 
+/// The built-in Moderation plugin and its Time out node.
+pub const MODERATION_PLUGIN: &str = "moderation";
+pub const TIMEOUT_NODE: &str = "timeout";
+
 /// A plugin's server code, in its folder: a WebAssembly component for the
 /// `plugin` world in `wit/plugin.wit`.
 pub const SERVER_FILE: &str = "server.wasm";
@@ -117,6 +121,11 @@ pub struct Manifest {
     /// program). Only once the user allows it ([`allowed_hears`]).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub hears: Vec<String>,
+    /// Its server code moderates the chat with the streamer's login
+    /// (`host.moderate`: timeouts, bans, deleting messages). Only once the
+    /// user allows it ([`moderates_now`]).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub moderates: bool,
     /// Settings for the whole plugin, set on the panel's Plugins page (an
     /// API key, a channel…): its server code reads them (`host.settings`),
     /// its overlay page gets them (`{ "type": "settings", "values": … }`).
@@ -331,6 +340,12 @@ const HEARABLE: [&str; 2] = [HEARS_CHAT, HEARS_EVENTS];
 /// the app), else what the user allowed.
 pub fn allowed_hears(info: &PluginInfo, allowed: &[String]) -> Vec<String> {
     info.manifest.hears.iter().filter(|what| info.bundled || allowed.contains(what)).cloned().collect()
+}
+
+/// Whether a plugin's server code may moderate the chat now: a built-in
+/// plugin's always (it comes with the app), else once the user allowed it.
+pub fn moderates_now(info: &PluginInfo, allowed: bool) -> bool {
+    info.manifest.moderates && (info.bundled || allowed)
 }
 
 /// The hosts a plugin's page may load from now: a built-in plugin's
@@ -2090,6 +2105,9 @@ pub enum PluginMessage {
         /// messages while it shows.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         preview: Option<PreviewRun>,
+        /// A test's or a replay's run (left out for one from the stream).
+        #[serde(default, skip_serializing_if = "crate::activity::ItemOrigin::is_live")]
+        origin: crate::activity::ItemOrigin,
     },
     /// The queue skipped a queued run (the panel's Skip): stop showing it.
     Skip { queue_id: u64 },
@@ -2925,11 +2943,18 @@ mod tests {
             queue_id: None,
             run_id: None,
             preview: None,
+            origin: Default::default(),
         };
         assert_eq!(
             serde_json::to_value(&message).unwrap(),
             json!({ "type": "run", "node": "burst", "input": "trigger", "values": { "pieces": 3 } })
         );
+        // A test's says so (a run from the stream says nothing).
+        let mut test = message.clone();
+        if let PluginMessage::Run { origin, .. } = &mut test {
+            *origin = crate::activity::ItemOrigin::Test;
+        }
+        assert_eq!(serde_json::to_value(&test).unwrap()["origin"], json!("test"));
         let queued = PluginMessage::Run {
             node: "burst".into(),
             input: "trigger".into(),
@@ -2939,6 +2964,7 @@ mod tests {
             queue_id: Some(7),
             run_id: None,
             preview: None,
+            origin: Default::default(),
         };
         assert_eq!(serde_json::to_value(&queued).unwrap()["queue_id"], json!(7));
         let done: PageMessage = serde_json::from_value(json!({ "type": "done", "queue_id": 7 })).unwrap();

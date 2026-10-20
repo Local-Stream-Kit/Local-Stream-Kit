@@ -221,7 +221,15 @@ impl Guest for Obs {
         connect();
     }
 
-    fn run(node: String, _input: String, values: Vec<NamedValue>, run: Option<u64>, queue_id: Option<u64>) {
+    fn run(
+        node: String,
+        _input: String,
+        values: Vec<NamedValue>,
+        _viewer: Option<Viewer>,
+        run: Option<u64>,
+        queue_id: Option<u64>,
+        _origin: RunOrigin,
+    ) {
         let text = |name: &str| setting(&values, name).trim().to_string();
         match node.as_str() {
             "switch_scene" => switch_scene(&text("scene"), run),
@@ -344,6 +352,9 @@ impl Guest for Obs {
     }
 
     fn on_response(_id: u32, _response: Result<Response, String>) {}
+
+    /// It doesn't moderate.
+    fn on_moderated(_id: u32, _done: Result<(), String>) {}
 
     fn on_socket(id: u32, event: SocketEvent) {
         if STATE.with_borrow(|state| state.socket) != Some(id) {

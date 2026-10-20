@@ -173,6 +173,7 @@ plugin:
 | `hosts` | | Hosts its server code may reach ([Permissions](#permissions)). |
 | `page_hosts` | | Hosts its overlay page may load from ([Permissions](#permissions)). |
 | `hears` | | `["chat"]`: its page and its server code (or program) get every chat message; `["events"]`: its server code (or program) gets every event ([Permissions](#permissions)). |
+| `moderates` | | `true`: its server code moderates the chat with the streamer's Twitch login, timing out and banning viewers and deleting messages (`host.moderate`, [Permissions](#permissions)). Only with server code. |
 | `voices` | | Text to speech voices, `[{ "id": "beeps", "name": "Beeps" }]` ([Voices](#voices)). |
 | `tab` | | A tab of its own in the panel, `{ "label": "Requests", "page": "tab.html", "count": true }` ([A tab in the panel](#a-tab-in-the-panel)). Not for a program. |
 
@@ -197,6 +198,9 @@ undoes it). Until then:
   every chat message ([Chat messages](#chat-messages)), and its server
   code's `on-chat` (or its program) too; `"events"`: its server code's
   `on-event` (or its program) gets every event.
+- **`moderates`**: `host.moderate` refuses. Allowed, it still moderates
+  only while the streamer is logged in with Twitch on Status, with
+  Moderating ticked.
 
 ### Voices
 
@@ -221,7 +225,7 @@ voices' messages are read in the app's own voice.
 | `queue` | effects | `"never"` (the default), `"always"`, or `"optional"`: the node's tick box setting with the key `queue` decides ("Wait in the queue"; the node shows it under all its fields). See [The queue](#the-queue). |
 | `describe` | effects | The input or setting whose value Activity shows for a queued run (an alert's message); else its title. |
 | `changes` | effects | Keys of the plugin's own `settings` a node can change for itself: the node gets "+ Change a setting", and its runs bring `changes`. |
-| `viewer` | effects | `true`: its runs bring the viewer who set it off as `values.viewer` ([Values](#values)). No input or setting may then be named `viewer`. |
+| `viewer` | effects | `true`: its runs bring the viewer who set it off as `values.viewer` ([Values](#values)); server code gets them as `run`'s `viewer`. No input or setting may then be named `viewer`. |
 
 **Sockets** (`inputs`, `outputs`): `name` (lowercase letters, digits,
 `_`), `label`, and `type`: `event`, `number`, `text` or `emotes`. One text
@@ -442,7 +446,7 @@ don't.
 
 | `type` | When | Fields |
 |---|---|---|
-| `run` | One of its effect nodes fired (for a queued node: its turn came) | `node`, `input` (the event input it came into), `values` ([Values](#values)), `changes` (only when the node changes some of the plugin's settings), `settings` (only with presets), `queue_id` (only for a queued run), `preview` (only in the panel's preview: `"show"` or `"play"`, see [Preview](#preview)) |
+| `run` | One of its effect nodes fired (for a queued node: its turn came) | `node`, `input` (the event input it came into), `values` ([Values](#values)), `changes` (only when the node changes some of the plugin's settings), `settings` (only with presets), `queue_id` (only for a queued run), `preview` (only in the panel's preview: `"show"` or `"play"`, see [Preview](#preview)), `origin` (only for a test's or a replay's run: `"test"` or `"replay"`) |
 | `skip` | The queue skipped its queued run: stop showing it | `queue_id` |
 | `settings` | When it loads, and whenever the plugin's own settings change | `values`: every setting by key, as in the settings table |
 | `volume` | When it loads, and whenever the master volume or mute changes | `volume` (0–1), `muted` |
@@ -650,7 +654,7 @@ tab (`examples/plugins/counter/overlay/tab.html`) lists its counts with
 `server.wasm`: a WebAssembly component (WASI 0.2) for the `plugin` world in
 [`plugin.wit`](../crates/protocol/wit/plugin.wit), which is the reference:
 copy it next to your code. Its package line is the interface's version
-(`lsk:plugin@0.6.0`); a `server.wasm` built for another version doesn't
+(`lsk:plugin@0.7.0`); a `server.wasm` built for another version doesn't
 load (its Plugins box says it doesn't fit), so rebuild it against the
 current file. New host functions don't change the version; new or
 changed exports do.
@@ -663,7 +667,7 @@ does the waiting, so no async is needed in any language.
 | Export | Called when |
 |---|---|
 | `start` | Once, when the plugin starts (the app starts, the plugin is switched on or updated). |
-| `run(node, input, values, run, queue-id)` | One of its effect nodes fired. `run` is `some(id)` when one of the node's own outputs is wired: pass it to `host.carry-on` to fire one. `queue-id` is `some(id)` when the node waits in the queue and this run's turn came: call `host.done` with it when it has finished. |
+| `run(node, input, values, viewer, run, queue-id, origin)` | One of its effect nodes fired. `viewer` is who set it off, for a node with `"viewer": true` (`none` for others, and for an event without one). `run` is `some(id)` when one of the node's own outputs is wired: pass it to `host.carry-on` to fire one. `queue-id` is `some(id)` when the node waits in the queue and this run's turn came: call `host.done` with it when it has finished. `origin`: `live`, `test` (the panel's Test, "Test this card", a preview) or `replay`. |
 | `skip(queue-id)` | The queued run on stage was skipped before it said `done`: undo what stays on. It needn't say `done`; Ended doesn't fire. |
 | `settings-changed` | Its plugin-wide settings changed: edited on the Plugins page (not its presets'), a secret saved or forgotten, a file setting's file edited. `host.settings` has the new ones; act again on what came from the old ones (connect again with a new address, say). Not called at `start`. |
 | `compute(node, values, run, origin)` → `computed` | One of its value nodes is needed for an event: `values` its inputs and settings, as `run`'s. Answer `now(values)` (its outputs' values by name; one left out gives nothing) or `later` and then `host.compute-later(run, …)`. |
@@ -674,6 +678,7 @@ does the waiting, so no async is needed in any language.
 | `route(node, input, values, viewer, run, origin)` → `routed` | An event came into one of its flow nodes on `input`. `values` as `run`'s; `viewer` who set it off (`none` for an event without one); `origin` `live`, `test` or `replay`. Answer `go({ output, values })` (one of its event outputs, and its value outputs' values by name), `stop`, or `later` and then `host.route-later(run, …)`. |
 | `on-timer(id)` | A timer it set went off. |
 | `on-response(id, response)` | A web request it started has an answer, or failed. |
+| `on-moderated(id, done)` | The answer to a `host.moderate`: `ok`, or `err(why)`, in Twitch's own words when it refused ("The user specified in the user_id field may not be banned."). |
 | `on-socket(id, event)` | A WebSocket it opened: `opened`, a text `message`, a `binary` message, or `closed` with why (also for a message bigger than 4 MB, which closes it). `closed` also comes for a connection that never opened (nothing listening, refused; on Windows only after about 2 s), with no `opened` before it. |
 | `speak(request, voice, text, speed)` | A message to make in one of its voices; answer with `host.spoken` and the same `request`. Never called without `voices`. |
 
@@ -708,6 +713,7 @@ path); `empty` (no picture or sound picked).
 | `set-choices(name, choices)` | The same, each choice a `{ value, label }`: the dropdown shows the label, the setting keeps the value (and your code gets it). Use it when what a user sees can change (a button's name) but what it stands for doesn't (an id), so cards keep working after a rename. An empty label shows the value. |
 | `spoken(request, audio)` | The answer to `speak`: `ok({ data, format })` with a whole `wav`, `mp3` or `ogg` file, or `err(why)`. |
 | `get(key)`, `set(key, value)` | Its own stored values (strings), kept between streams in `plugin_data/<id>.json`. `none` removes a key. |
+| `moderate(platform, what)` → id | With `"moderates": true`, allowed: on `platform`'s chat (`twitch` so far), with the streamer's login, times a viewer out (`timeout({ viewer, seconds })`: their id, and 1 second to two weeks), bans one (`ban(id)`), or deletes a message (`delete(id)`: a chat line's `id`, as `on-chat` heard it). The answer comes to `on-moderated`; an error at once says why it can't be done at all (not allowed, not logged in, Moderating off on Status, 20 waiting for Twitch already). Act only on `live` runs (`origin`): a replay brings back an earlier event's real viewer. |
 
 ### Limits
 
@@ -715,7 +721,7 @@ Breaking one stops the plugin (see [When it doesn't work](#when-it-doesnt-work))
 
 - one second per call, `start` included;
 - 64 MB of memory;
-- 100 timers, 8 WebSockets;
+- 100 timers, 8 WebSockets, 20 moderations waiting for Twitch;
 - 4 MB per web answer and per WebSocket message, 30 seconds per web
   request;
 - 1 MB of stored values in all;
@@ -753,7 +759,16 @@ impl Guest for MyPlugin {
     fn start() {
         host::log(Level::Info, "started");
     }
-    fn run(_node: String, _input: String, _values: Vec<NamedValue>, _run: Option<u64>, _queue_id: Option<u64>) {}
+    fn run(
+        _node: String,
+        _input: String,
+        _values: Vec<NamedValue>,
+        _viewer: Option<Viewer>,
+        _run: Option<u64>,
+        _queue_id: Option<u64>,
+        _origin: RunOrigin,
+    ) {
+    }
     fn skip(_queue_id: u64) {}
     fn settings_changed() {}
     fn route(
@@ -775,6 +790,7 @@ impl Guest for MyPlugin {
     fn on_timer(_id: u32) {}
     fn on_response(_id: u32, _response: Result<Response, String>) {}
     fn on_socket(_id: u32, _event: SocketEvent) {}
+    fn on_moderated(_id: u32, _done: Result<(), String>) {}
     fn speak(_request: u32, _voice: String, _text: String, _speed: f32) {}
 }
 
@@ -898,6 +914,7 @@ Control API; the WebSocket is at `/control/ws` on the same address.
 | [`examples/programs/fake-platform.mjs`](../examples/programs/fake-platform.mjs) | A program (Node, nothing to install): an event node, an effect node, a voice. |
 | [`examples/programs/chat-regulars.mjs`](../examples/programs/chat-regulars.mjs) | A program (Node) that hears the chat and events: a value node (`compute`), a flow node (`route`), and an event node fired one copy at a time (`nodes`, `emit` with `to`), each with its own settings. |
 | [`crates/e2e/plugins/host-check`](../crates/e2e/plugins/host-check) | Rust server code using every `host` call: timers, web requests, WebSockets, settings (and `settings-changed`), a secret, choices, a voice, an effect node's own output (Relay), a queued node (Hold: `done`, `skip`), a flow node answering later (Later: `route-later`), a tab with a number on it (`set-tab-count`). |
+| [`crates/moderation`](../crates/moderation) with [its manifest](../crates/server/plugins/moderation/plugin.json) | Rust server code that moderates (`moderates`, `host.moderate`, `on-moderated`), with effect nodes that get the viewer (`viewer`) and leave tests alone (`origin`), and a note on its box when it didn't work. |
 | [`crates/obs`](../crates/obs) with [its manifest](../crates/server/plugins/obs/plugin.json) | A whole plugin in Rust server code: a WebSocket kept open, a secret setting, choices filled in and following each other (`sources/{scene}`), a status, a note under a setting, `settings-changed` (connects again on a new address), own outputs, queued runs with `skip`, event nodes with a filter (`many`). |
 | [`crates/server/plugins/sound`](../crates/server/plugins/sound) | The queue (`done`, `skip`, a run sent twice), the master volume, a required sound. Plain JavaScript. |
 | [`crates/server/plugins/media`](../crates/server/plugins/media) | A media setting: pictures, and videos with their sound; an optional queue. |
@@ -912,5 +929,4 @@ Control API; the WebSocket is at `/control/ws` on the same address.
 - A list (`many`) anywhere but an event node's text settings.
 - Effect nodes' own outputs fired by a page or a program (only server
   code fires them).
-- Server code's effect runs don't bring `changes`, preset `settings` or
-  the `viewer`.
+- Server code's effect runs don't bring `changes` or preset `settings`.

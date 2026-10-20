@@ -99,6 +99,9 @@ pub struct Model {
     pub plugin_failures: Rc<Vec<PluginFailure>>,
     /// Why a plugin couldn't be removed or forgotten, for the Plugins page.
     pub plugin_problem: Option<String>,
+    /// Why the last card export or import didn't work, for the card's
+    /// editor, until it's closed.
+    pub card_file_problem: Option<String>,
     /// What plugins' server code last sent their tabs, numbered, at most
     /// [`TAB_MESSAGES_KEPT`]: the open tab passes on the ones after the
     /// last it passed.
@@ -151,6 +154,7 @@ impl Default for Model {
             plugins: Rc::default(),
             plugin_failures: Rc::default(),
             plugin_problem: None,
+            card_file_problem: None,
             tab_messages: Rc::default(),
             viewer: None,
             opening: None,
@@ -235,6 +239,9 @@ pub enum Action {
     /// The note on what preparing the waiting events again changed was
     /// closed.
     QueueNoteClosed,
+    /// Why a card export or import didn't work, or `None`: closed, or
+    /// trying again.
+    CardFileProblem(Option<String>),
     /// A plugin's file setting's look edited here (`None`: as saved again).
     FileDraft {
         plugin: String,
@@ -459,6 +466,10 @@ impl Reducible for Model {
                 }
             }
             Action::QueueNoteClosed => model.queue_note = None,
+            Action::CardFileProblem(problem) => model.card_file_problem = problem,
+            Action::Server(PanelEvent::ExportFailed { message }) => {
+                model.card_file_problem = Some(format!("Not exported: {message}."));
+            }
             Action::FileDraft { plugin, key, draft } => {
                 let drafts = Rc::make_mut(&mut model.file_drafts);
                 match draft {

@@ -151,6 +151,12 @@ pub enum ItemOrigin {
     Test,
 }
 
+impl ItemOrigin {
+    pub fn is_live(&self) -> bool {
+        *self == ItemOrigin::Live
+    }
+}
+
 /// The queue as it is now.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct QueueState {

@@ -65,6 +65,7 @@ pub fn icon(name: &str) -> Html {
     let path = match name {
         "plus" => "M8 3v10M3 8h10",
         "download" => "M8 2.5v8M4.5 7 8 10.5 11.5 7M3 13.5h10",
+        "upload" => "M8 10.5v-8M4.5 6 8 2.5 11.5 6M3 13.5h10",
         "back" => "M10 3 5 8l5 5",
         "warn" => "M8 2 14.5 13.5h-13zM8 6.5v3M8 11.6v.4",
         "error" => "M8 2a6 6 0 1 0 0 12A6 6 0 0 0 8 2zM8 5v3.5M8 11v.3",

@@ -244,6 +244,10 @@ pub struct PluginConfig {
     /// What the user allowed its page to hear (the manifest's `hears`).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub hears: Vec<String>,
+    /// The user allowed its server code to moderate the chat (the
+    /// manifest's `moderates`).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub moderates: bool,
     /// For a plugin with presets (the manifest's `presets`): its settings
     /// as named sets, instead of `settings`; none yet = one, "Default".
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -258,6 +262,7 @@ impl Default for PluginConfig {
             hosts: Vec::new(),
             page_hosts: Vec::new(),
             hears: Vec::new(),
+            moderates: false,
             presets: Vec::new(),
         }
     }

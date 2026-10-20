@@ -15,6 +15,7 @@ use protocol::panel::{PanelRequest, TestEvent, TestHypeTrain};
 use protocol::plugin::{Attached, NodeType};
 use yew::prelude::*;
 
+use crate::card_file;
 use crate::model::SaveState;
 use crate::route::Route;
 use crate::views::icon;
@@ -158,8 +159,9 @@ pub fn CardEditor(props: &CardEditorProps) -> Html {
     let panel = use_context::<Panel>().expect("panel context");
     // "Sent" shows on the test button for a moment.
     let sent = use_state(|| None::<Timeout>);
-    // The narrow layout's menu (Duplicate, Delete), open or not.
+    // The ⋯ menu (Duplicate, Export, Delete), open or not.
     let menu_open = use_state(|| false);
+    card_file::use_own_problem(props.id.clone());
     let Some(config) = &panel.model.config else { return html! {} };
     let Some(card) = config.cards.iter().find(|card| card.id == props.id) else {
         return html! {
@@ -218,6 +220,21 @@ pub fn CardEditor(props: &CardEditorProps) -> Html {
             });
             Route::Card(new_id).go();
         })
+    };
+    // The card as shown, unsaved edits too; the app saves it in Downloads.
+    let export = {
+        let panel = panel.clone();
+        let card = card.clone();
+        let menu_open = menu_open.clone();
+        Callback::from(move |_| {
+            menu_open.set(false);
+            panel.card_file_problem(None);
+            panel.send(PanelRequest::ExportCard { card: card.clone() });
+        })
+    };
+    let close_problem = {
+        let panel = panel.clone();
+        Callback::from(move |_| panel.card_file_problem(None))
     };
     let delete = {
         let panel = panel.clone();
@@ -294,12 +311,15 @@ pub fn CardEditor(props: &CardEditorProps) -> Html {
                 <button type="button" class="icon-button flat" aria-label="Redo" title="Redo (Ctrl+Y)"
                         disabled={!panel.model.can_redo()} onclick={redo}>{ icon("redo") }</button>
                 <div class="bar-menu" onkeydown={menu_keys}>
-                    <button type="button" class="icon-button flat" aria-label="More: duplicate, delete" title="Duplicate, delete"
+                    <button type="button" class="icon-button flat" aria-label="More: duplicate, export, delete"
+                            title="Duplicate, export, delete"
                             aria-haspopup="menu" aria-expanded={menu_open.to_string()} onclick={toggle_menu}>{ icon("more") }</button>
                     if *menu_open {
                         <div class="bar-menu-backdrop" onclick={close_menu}></div>
                         <div class="bar-menu-list" role="menu">
                             <button type="button" class="menu-item" role="menuitem" onclick={duplicate}>{ icon("duplicate") }{ "Duplicate" }</button>
+                            <button type="button" class="menu-item" id="card-export" role="menuitem"
+                                    disabled={!panel.model.connected} onclick={export}>{ icon("download") }{ "Export" }</button>
                             <button type="button" class="menu-item danger" role="menuitem" onclick={delete}>{ icon("trash") }{ "Delete" }</button>
                         </div>
                     }
@@ -310,6 +330,12 @@ pub fn CardEditor(props: &CardEditorProps) -> Html {
                 </button>
             </header>
             <Banners />
+            if let Some(problem) = &panel.model.card_file_problem {
+                <div class="banner error with-close" role="alert" id="card-file-problem">
+                    <span>{ problem.clone() }</span>
+                    <button type="button" class="notice-close" title="Close" aria-label="Close" onclick={close_problem}>{ "×" }</button>
+                </div>
+            }
             <div class="editor-body">
                 <nav class="editor-side" aria-label="Cards">
                     <div class="side-head">

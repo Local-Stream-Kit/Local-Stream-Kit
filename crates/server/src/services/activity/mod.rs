@@ -237,6 +237,7 @@ impl Item {
                 queue_id: Some(self.id),
                 run_id: None,
                 preview: None,
+                origin: self.origin,
             },
         })
     }

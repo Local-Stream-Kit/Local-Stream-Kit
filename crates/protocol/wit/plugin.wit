@@ -5,13 +5,14 @@
 // The app calls the plugin one thing at a time (`start`, an effect node's
 // `run`, a flow node's `route`, a value node's `compute`, the chat and the
 // events it hears, a message from its tab in the panel, a timer, a web
-// answer, a socket message), each within a
+// answer, a socket message, a moderation's answer), each within a
 // time limit, and does all the waiting itself: nothing here blocks, so a
 // plugin needs no async. A card never waits on a plugin either: an event
 // that reaches a plugin's flow or value node waits for its answer while
 // the cards carry on with other events. Web requests and sockets only
-// reach the hosts listed in the plugin's `plugin.json` (`hosts`).
-package lsk:plugin@0.6.0;
+// reach the hosts listed in the plugin's `plugin.json` (`hosts`), and
+// only a plugin with `"moderates": true` there moderates the chat.
+package lsk:plugin@0.7.0;
 
 interface types {
     /// An emote: its code, its image's path on the app (`/emote/…`), and
@@ -247,6 +248,24 @@ interface types {
         settings: list<named-value>,
     }
 
+    /// What `host.moderate` does, on the platform it names.
+    variant moderation {
+        /// Times a viewer out.
+        timeout(timeout),
+        /// Bans a viewer: their id.
+        ban(string),
+        /// Takes one message out of the chat: a chat line's `id`, as
+        /// `on-chat` heard it.
+        delete(string),
+    }
+
+    record timeout {
+        /// The viewer's id.
+        viewer: string,
+        /// 1 to 1,209,600 (two weeks); outside that, the nearest.
+        seconds: u32,
+    }
+
     /// A status's colour on the panel.
     enum status-level {
         /// Working (green).
@@ -260,7 +279,7 @@ interface types {
 
 /// What the app offers a plugin.
 interface host {
-    use types.{audio, choice, level, named-event-value, named-value, request, status-level};
+    use types.{audio, choice, level, moderation, named-event-value, named-value, request, status-level};
 
     /// A line in the app's log, marked with the plugin's id.
     log: func(level: level, message: string);
@@ -378,6 +397,14 @@ interface host {
     get: func(key: string) -> option<string>;
     /// `none` removes the key.
     set: func(key: string, value: option<string>);
+
+    /// Moderates the chat with the streamer's login, for a plugin with
+    /// `"moderates": true` in its `plugin.json`, allowed on the Plugins
+    /// page. `platform` is the viewer's (`viewer.platform`, `twitch`).
+    /// `on-moderated` gets the answer with the returned id; an error here
+    /// says why it can't be done at all (not allowed, not logged in,
+    /// Moderating off on Status, 20 waiting for an answer already).
+    moderate: func(platform: string, what: moderation) -> result<u32, string>;
 }
 
 world plugin {
@@ -391,17 +418,21 @@ world plugin {
     export start: func();
 
     /// One of the plugin's effect nodes fired: `input` is the event input
-    /// the event came into; `values` every other input and every setting.
-    /// `run` is there when one of the node's own outputs is wired: give it
-    /// to `host.carry-on` to fire one. `queue-id` is there when the node
-    /// waits in the queue (its `queue`) and this run's turn has come: say
-    /// `host.done` with it when it has finished.
+    /// the event came into; `values` every other input and every setting;
+    /// `viewer` who set it off, for a node with `"viewer": true` (`none`
+    /// for others, and for an event without one). `run` is there when one
+    /// of the node's own outputs is wired: give it to `host.carry-on` to
+    /// fire one. `queue-id` is there when the node waits in the queue (its
+    /// `queue`) and this run's turn has come: say `host.done` with it when
+    /// it has finished. `origin`: the stream, a test, or a replay.
     export run: func(
         node: string,
         input: string,
         values: list<named-value>,
+        viewer: option<viewer>,
         run: option<u64>,
         queue-id: option<u64>,
+        origin: run-origin,
     );
 
     /// The queued run `queue-id` was skipped (the panel's Skip) before it
@@ -459,6 +490,10 @@ world plugin {
     export on-timer: func(id: u32);
     export on-response: func(id: u32, response: result<response, string>);
     export on-socket: func(id: u32, event: socket-event);
+
+    /// The answer to a `host.moderate` with this id: done, or why not
+    /// (Twitch's own words when it refused).
+    export on-moderated: func(id: u32, done: result<_, string>);
 
     /// Text to speech, for a plugin with `voices` in its plugin.json:
     /// make `text` in `voice` (one of its voices' ids) at `speed` (1 is

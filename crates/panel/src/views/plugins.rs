@@ -46,7 +46,7 @@ fn edit_plugin(panel: &Panel, id: &str, key: Option<String>, change: impl Fn(&mu
 
 /// Whether a plugin that's on waits for something to be allowed (not a
 /// built-in's): the hosts its server code connects to, where its page
-/// loads from or what it hears.
+/// loads from, what it hears or its moderating.
 fn waits_for_you(plugin: &PluginInfo, settings: &PluginConfig) -> bool {
     let manifest = &plugin.manifest;
     let all = |wanted: &[String], allowed: &[String]| wanted.iter().all(|each| allowed.contains(each));
@@ -54,7 +54,8 @@ fn waits_for_you(plugin: &PluginInfo, settings: &PluginConfig) -> bool {
         && ((plugin.server && !server_hosts_allowed(plugin, &settings.hosts))
             || (!plugin.bundled
                 && (!all(&manifest.page_hosts, &settings.page_hosts)
-                    || !all(&manifest.hears, &settings.hears))))
+                    || !all(&manifest.hears, &settings.hears)
+                    || (manifest.moderates && !settings.moderates))))
 }
 
 /// How many plugins need a look (the header's Plugins dot): their server
@@ -639,6 +640,14 @@ fn PluginBox(props: &PluginBoxProps) -> Html {
             edit_plugin(&panel, &id, None, move |entry| entry.hears = hears.clone());
         })
     };
+    // Its moderating: a built-in's is allowed.
+    let moderates_allowed = plugin.bundled || props.settings.moderates;
+    let set_moderates = |moderates: bool| {
+        let (panel, id) = (panel.clone(), id.clone());
+        Callback::from(move |_: MouseEvent| {
+            edit_plugin(&panel, &id, None, move |entry| entry.moderates = moderates);
+        })
+    };
 
     html! {
         <section class="panel-box plugin-box" id={base.clone()}>
@@ -726,6 +735,20 @@ fn PluginBox(props: &PluginBoxProps) -> Html {
                     <span class="muted">{ format!("It hears {hears_short}") }</span>
                     <button type="button" class="button ghost small" id={format!("{base}-disallow-hears")}
                             onclick={set_hears(Vec::new())}>{ "Take back" }</button>
+                </div>
+            }
+            if manifest.moderates && !moderates_allowed {
+                { allow_notice(
+                    format!("{base}-moderates"),
+                    "It wants to time out and ban viewers and delete messages, with your Twitch login. It doesn't until you allow it.".to_string(),
+                    format!("{base}-allow-moderates"),
+                    set_moderates(true),
+                ) }
+            } else if manifest.moderates && !plugin.bundled {
+                <div class="status-row small">
+                    <span class="muted">{ "It moderates the chat" }</span>
+                    <button type="button" class="button ghost small" id={format!("{base}-disallow-moderates")}
+                            onclick={set_moderates(false)}>{ "Take back" }</button>
                 </div>
             }
             { preset_bar }
@@ -881,6 +904,7 @@ fn PluginPreview(props: &PluginPreviewProps) -> Html {
                     queue_id: None,
                     run_id: None,
                     preview: Some(preview),
+                    origin: protocol::activity::ItemOrigin::Test,
                 }
             }
             _ => PluginMessage::Samples,

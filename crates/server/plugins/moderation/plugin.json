@@ -1,0 +1,32 @@
+{
+  "id": "moderation",
+  "name": "Moderation",
+  "version": "1.0.0",
+  "api": 1,
+  "author": "Local Stream Kit",
+  "moderates": true,
+  "nodes": [
+    {
+      "id": "timeout",
+      "title": "Time out",
+      "category": "effects",
+      "viewer": true,
+      "inputs": [
+        { "name": "trigger", "label": "Trigger", "type": "event" },
+        { "name": "seconds", "label": "Seconds", "type": "number" }
+      ],
+      "settings": [
+        { "key": "seconds", "label": "Seconds", "type": "number", "default": 10, "min": 1, "max": 1209600 }
+      ]
+    },
+    {
+      "id": "ban",
+      "title": "Ban",
+      "category": "effects",
+      "viewer": true,
+      "inputs": [
+        { "name": "trigger", "label": "Trigger", "type": "event" }
+      ]
+    }
+  ]
+}

@@ -1245,6 +1245,60 @@ fn settings_problem(kind: &NodeKind) -> Option<String> {
     }
 }
 
+/// A card as Export saves it and Import reads it:
+/// `{ "lsk": "card", "version": 1, "card": {…} }`. `version` is the
+/// config's format ([`CONFIG_VERSION`](crate::config::CONFIG_VERSION)), so
+/// a later version can convert an older card as it converts the config.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CardFile {
+    pub lsk: String,
+    pub version: u32,
+    pub card: Card,
+}
+
+/// What a card file's `lsk` says.
+const CARD_FILE_TAG: &str = "card";
+
+/// Why a file wasn't imported.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CardFileError {
+    /// It isn't a card file (or not one this version can read).
+    NotACard,
+    /// It's from a newer version of the app.
+    Newer,
+}
+
+impl CardFile {
+    pub fn new(card: Card) -> CardFile {
+        CardFile { lsk: CARD_FILE_TAG.into(), version: crate::config::CONFIG_VERSION, card }
+    }
+
+    /// The file's text, indented: people read and share these too.
+    pub fn to_json(&self) -> String {
+        serde_json::to_string_pretty(self).expect("a card is JSON")
+    }
+
+    /// The card in a file's text.
+    pub fn parse(text: &str) -> Result<Card, CardFileError> {
+        #[derive(Deserialize)]
+        struct Head {
+            lsk: String,
+            version: u32,
+        }
+        // Notepad may start it with a byte order mark.
+        let text = text.trim_start_matches('\u{feff}');
+        let head: Head = serde_json::from_str(text).map_err(|_| CardFileError::NotACard)?;
+        if head.lsk != CARD_FILE_TAG {
+            return Err(CardFileError::NotACard);
+        }
+        if head.version > crate::config::CONFIG_VERSION {
+            return Err(CardFileError::Newer);
+        }
+        let file: CardFile = serde_json::from_str(text).map_err(|_| CardFileError::NotACard)?;
+        Ok(file.card)
+    }
+}
+
 /// Builds cards in code: premade cards and presets.
 struct CardBuilder {
     card: Card,
@@ -1330,6 +1384,21 @@ fn hype_train_bar_node() -> NodeKind {
         plugin: crate::plugin::HYPE_TRAIN_PLUGIN.into(),
         node: crate::plugin::HYPE_TRAIN_BAR_NODE.into(),
         settings: serde_json::Map::new(),
+        changes: serde_json::Map::new(),
+        voice: Overrides::new(),
+        ty: Attached(None),
+    }
+}
+
+/// A node of the built-in Moderation plugin: times the event's viewer out
+/// for `seconds`.
+fn timeout_node(seconds: f64) -> NodeKind {
+    let mut settings = serde_json::Map::new();
+    settings.insert("seconds".into(), seconds.into());
+    NodeKind::Plugin {
+        plugin: crate::plugin::MODERATION_PLUGIN.into(),
+        node: crate::plugin::TIMEOUT_NODE.into(),
+        settings,
         changes: serde_json::Map::new(),
         voice: Overrides::new(),
         ty: Attached(None),
@@ -1729,6 +1798,18 @@ pub fn presets() -> Vec<Preset> {
             description: "A bar on the overlay that fills up as a hype train goes.",
             card: |id| hype_train_bar(id, true),
         },
+        Preset {
+            group: PresetGroup::More,
+            title: "Vanish",
+            description: "“!vanish” times the viewer out for 10 s, clearing their messages (needs the Twitch login, with Moderating).",
+            card: |id| {
+                let mut card = CardBuilder::new(id, "Vanish", true);
+                let command = card.node(NodeKind::ChatCommand { command: "!vanish".into() }, 40.0, 60.0);
+                let timeout = card.node(timeout_node(10.0), 360.0, 60.0);
+                card.wire(command, "event", timeout, "trigger");
+                card.card
+            },
+        },
     ]
 }
 
@@ -1749,6 +1830,7 @@ mod tests {
             manifest(include_str!("../../server/plugins/alert/plugin.json")),
             manifest(include_str!("../../server/plugins/speak/plugin.json")),
             manifest(include_str!("../../server/plugins/hype-train/plugin.json")),
+            manifest(include_str!("../../server/plugins/moderation/plugin.json")),
         ])
     }
 
@@ -1795,6 +1877,28 @@ mod tests {
         assert_eq!(json["wires"][0]["from"], serde_json::json!({ "node": 1, "socket": "event" }));
         let back: Card = serde_json::from_value(json).unwrap();
         assert_eq!(back, card);
+    }
+
+    #[test]
+    fn card_files() {
+        let mut card = hydrate("hydrate", true);
+        card.attach_plugins(&built_in());
+        let text = CardFile::new(card.clone()).to_json();
+        let json: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!((json["lsk"].as_str(), json["version"].as_u64()), (Some("card"), Some(1)));
+        assert!(!text.contains("\"inputs\""), "plugin nodes' types aren't saved");
+        assert_eq!(CardFile::parse(&text), Ok(card.clone()));
+        assert_eq!(CardFile::parse(&format!("\u{feff}{text}")), Ok(card), "a byte order mark is skipped");
+
+        let newer = text.replacen("\"version\": 1", "\"version\": 2", 1);
+        assert_eq!(CardFile::parse(&newer), Err(CardFileError::Newer));
+        // Nodes copied in the editor, a config, anything else.
+        assert_eq!(CardFile::parse(r#"{"lsk":"nodes","nodes":[],"wires":[]}"#), Err(CardFileError::NotACard));
+        assert_eq!(CardFile::parse(r#"{"version":1,"cards":[]}"#), Err(CardFileError::NotACard));
+        assert_eq!(CardFile::parse("not json"), Err(CardFileError::NotACard));
+        let unknown = text.replacen("\"reward\",", "\"no-such-node\",", 1);
+        assert_ne!(unknown, text);
+        assert_eq!(CardFile::parse(&unknown), Err(CardFileError::NotACard));
     }
 
     #[test]

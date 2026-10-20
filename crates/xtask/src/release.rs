@@ -7,6 +7,10 @@
 //! `v<version>` and pushes the two to the public repo, where the release
 //! workflow (`.github/workflows/release.yml`) builds the draft release.
 //!
+//! Before the tag, it runs the workflow's unit tests at the new version: a
+//! test can pass at the version `main` had and fail at the new one, and a
+//! pushed tag can't be moved, so that version would be lost.
+//!
 //! The internal docs are the project's own notes: every Markdown file in
 //! the repo's root and in `docs/` except the ones in [`PUBLIC_ROOT`] and
 //! [`PUBLIC_DOCS`]. A new doc is internal until it's added there.
@@ -36,16 +40,59 @@ const RELEASE: &str = "refs/heads/release";
 /// The Stream Deck plugin's manifest, whose `Version` is the plugin's own.
 const STREAMDECK_MANIFEST: &str = "streamdeck/com.localstreamkit.streamdeck.sdPlugin/manifest.json";
 
+/// The packages the release workflow runs the unit tests of.
+const TESTED: [&str; 4] = ["protocol", "lsk", "panel", "xtask"];
+
+/// The unit tests a release runs before it tags.
+struct Tests<'a> {
+    /// The packages, as `cargo test -p` takes them.
+    packages: &'a [&'a str],
+    /// What the tests read that isn't in the repo, from the workspace's
+    /// root: the pages and server code `cargo e2e` builds.
+    built: Vec<String>,
+    /// Whether their output is shown: not in this file's own tests, where
+    /// one fails on purpose.
+    print: bool,
+}
+
+impl Tests<'_> {
+    fn command(&self) -> Vec<&str> {
+        let mut args = vec!["test", "--locked"];
+        for package in self.packages {
+            args.extend(["-p", package]);
+        }
+        args
+    }
+}
+
 /// Runs `cargo release`: `args` are the version and `--dry-run`.
 pub fn release(root: &Path, args: &[String]) -> Result<(), String> {
+    let built = crate::WEB
+        .iter()
+        .map(|(_, dist)| dist.to_string())
+        .chain(crate::SERVERS.iter().map(|(_, folder)| format!("{folder}/server.wasm")))
+        .collect();
+    release_with(root, args, &Tests { packages: &TESTED, built, print: true })
+}
+
+fn release_with(root: &Path, args: &[String], tests: &Tests) -> Result<(), String> {
     let dry_run = args.iter().any(|arg| arg == "--dry-run");
     let rest: Vec<&String> = args.iter().filter(|arg| *arg != "--dry-run").collect();
     let [version] = rest[..] else {
         return Err("usage: cargo release <version> [--dry-run], the version as 0.2.0".to_string());
     };
+    let missing: Vec<&str> =
+        tests.built.iter().filter(|path| !root.join(path).exists()).map(String::as_str).collect();
+    if !missing.is_empty() {
+        return Err(format!(
+            "the unit tests need what cargo e2e builds, and it isn't built ({}). Run cargo e2e (a \
+             release needs it passing anyway), then cargo release again",
+            missing.join(", ")
+        ));
+    }
     let git = Git::new(root);
     let plan = Plan::make(&git, version)?;
-    if dry_run { plan.print_dry_run(&git) } else { plan.apply(&git, root) }
+    if dry_run { plan.print_dry_run(&git, tests) } else { plan.apply(&git, root, tests) }
 }
 
 /// Whether `path` (as git writes it, with `/`) is one of the internal
@@ -279,7 +326,7 @@ impl Plan {
 
     /// Lists the public files and what's left out, and what a real run
     /// would do.
-    fn print_dry_run(&self, git: &Git) -> Result<(), String> {
+    fn print_dry_run(&self, git: &Git, tests: &Tests) -> Result<(), String> {
         println!();
         println!("Public files ({}):", self.public.len());
         for path in &self.public {
@@ -300,6 +347,7 @@ impl Plan {
         } else {
             println!("- leave main as it is: it has version {} already", self.version);
         }
+        println!("- run the unit tests at {} (cargo {})", self.version, tests.command().join(" "));
         let changed = match (&self.parent, &self.parent_version) {
             (Some(parent), Some(last)) => {
                 let files = git.run(&["diff", "--name-only", parent, &self.release_commit])?;
@@ -313,8 +361,9 @@ impl Plan {
         Ok(())
     }
 
-    /// Moves `main`, `release` and the tag, then pushes.
-    fn apply(&self, git: &Git, root: &Path) -> Result<(), String> {
+    /// Moves `main`, runs the unit tests, then moves `release` and the tag
+    /// and pushes.
+    fn apply(&self, git: &Git, root: &Path, tests: &Tests) -> Result<(), String> {
         let tag = self.tag();
         if self.version_changes() {
             git.run(&["merge", "--ff-only", "-q", &self.version_commit])?;
@@ -335,6 +384,25 @@ impl Plan {
                     self.version
                 ));
             }
+        }
+        println!("Running the unit tests at {}", self.version);
+        let mut command = Command::new(crate::cargo());
+        command.args(tests.command()).arg("--quiet").current_dir(root);
+        if !tests.print {
+            command.stdout(Stdio::null()).stderr(Stdio::null());
+        }
+        let tested = command.status().map_err(|error| format!("couldn't run cargo: {error}"))?;
+        if !tested.success() {
+            let (kept, again) = if self.version_changes() {
+                ("; main has the version commit", " (it makes no second one)")
+            } else {
+                ("", "")
+            };
+            return Err(format!(
+                "the unit tests fail at {} (above), so nothing was tagged or pushed{kept}. Fix them, \
+                 commit and run cargo release {} again{again}",
+                self.version, self.version
+            ));
         }
         let zero = "0".repeat(self.release_commit.len());
         let expected = self.parent.as_deref().unwrap_or(&zero);
@@ -751,6 +819,15 @@ mod tests {
         )));
     }
 
+    /// A release runs the unit tests the release workflow runs, so a tag
+    /// never meets tests it hasn't passed.
+    #[test]
+    fn the_workflows_unit_tests() {
+        let workflow = include_str!("../../../.github/workflows/release.yml");
+        let tests = Tests { packages: &TESTED, built: Vec::new(), print: false };
+        assert!(workflow.contains(&format!("cargo {}\n", tests.command().join(" "))));
+    }
+
     #[test]
     fn the_stream_deck_plugins_own_files() {
         for path in [
@@ -850,9 +927,15 @@ mod tests {
             std::fs::write(path, text).unwrap();
         }
 
+        /// A release that tests crate `a`, the stand-in workspace's.
         fn release(&self, args: &[&str]) -> Result<(), String> {
+            self.release_needing(args, &[])
+        }
+
+        fn release_needing(&self, args: &[&str], built: &[&str]) -> Result<(), String> {
             let args: Vec<String> = args.iter().map(|arg| arg.to_string()).collect();
-            release(&self.dir.join("work"), &args)
+            let built = built.iter().map(|path| path.to_string()).collect();
+            release_with(&self.dir.join("work"), &args, &Tests { packages: &["a"], built, print: false })
         }
     }
 
@@ -872,6 +955,9 @@ mod tests {
         repo.git("work", &["config", "user.name", "Test"]);
         repo.git("work", &["config", "user.email", "test@example.com"]);
         repo.git("work", &["config", "core.autocrlf", "false"]);
+        // Where the tests' cargo builds.
+        std::fs::create_dir_all(repo.dir.join("work/.git/info")).unwrap();
+        std::fs::write(repo.dir.join("work/.git/info/exclude"), "/target/\n").unwrap();
         repo.git(".", &["init", "-q", "--bare", "-b", "main", "public.git"]);
         repo.write(
             "Cargo.toml",
@@ -904,6 +990,8 @@ mod tests {
         repo.git("work", &["config", "remote.public.push", PUSH_REFSPEC]);
 
         assert!(repo.release(&["v0.1.0"]).unwrap_err().contains("without the v"));
+        let error = repo.release_needing(&["0.1.0", "--dry-run"], &["crates/a/dist"]).unwrap_err();
+        assert!(error.contains("isn't built (crates/a/dist). Run cargo e2e"), "{error}");
         repo.release(&["0.1.0", "--dry-run"]).unwrap();
         assert!(Git::new(&public).verify("refs/heads/main").unwrap().is_none(), "a dry run pushes nothing");
         let work = Git::new(&repo.dir.join("work"));
@@ -945,9 +1033,29 @@ mod tests {
         repo.write(STREAMDECK_MANIFEST, "{ \"Version\": \"0.1.1.0\" }\n");
         repo.git("work", &["commit", "-q", "-am", "Plugin 0.1.1.0"]);
 
-        // The second: a version commit on main, a release on top of the first.
-        repo.release(&["0.2.0"]).unwrap();
+        // A test that passes at 0.1.0 and fails at 0.2.0 stops the release
+        // before anything is tagged, main keeping the version commit.
+        let lib =
+            |assertion: &str| format!("//! A crate.\n\n#[test]\nfn version() {{\n    {assertion};\n}}\n");
+        repo.write("crates/a/src/lib.rs", &lib("assert_eq!(env!(\"CARGO_PKG_VERSION\"), \"0.1.0\")"));
+        repo.git("work", &["commit", "-q", "-am", "A test"]);
+        let error = repo.release(&["0.2.0"]).unwrap_err();
+        assert!(error.contains("the unit tests fail at 0.2.0"), "{error}");
         assert_eq!(repo.git("work", &["log", "-1", "--format=%s", "main"]), "Version 0.2.0");
+        assert_eq!(work.verify(RELEASE).unwrap(), Some(first.clone()), "release didn't move");
+        assert!(work.verify("refs/tags/v0.2.0").unwrap().is_none(), "no tag");
+        assert_eq!(repo.git("public.git", &["rev-parse", "main"]), first, "nothing pushed");
+        repo.write("crates/a/src/lib.rs", &lib("assert!(!env!(\"CARGO_PKG_VERSION\").is_empty())"));
+        repo.git("work", &["commit", "-q", "-am", "A test for any version"]);
+
+        // The second: a version commit on main (the one made already), a
+        // release on top of the first.
+        repo.release(&["0.2.0"]).unwrap();
+        assert_eq!(
+            repo.git("work", &["log", "-2", "--format=%s", "main"]),
+            "A test for any version\nVersion 0.2.0",
+            "no second version commit"
+        );
         assert_eq!(repo.git("work", &["status", "--porcelain"]), "", "the checkout has the version commit");
         let toml = std::fs::read_to_string(repo.dir.join("work/Cargo.toml")).unwrap();
         assert!(toml.contains("version = \"0.2.0\""));
@@ -974,7 +1082,11 @@ mod tests {
         repo.git("elsewhere", &["push", "-q", "origin", "main"]);
         let error = repo.release(&["0.3.0"]).unwrap_err();
         assert!(error.contains("changed there since"), "{error}");
-        assert_eq!(repo.git("work", &["log", "-1", "--format=%s", "main"]), "Version 0.2.0", "nothing done");
+        assert_eq!(
+            repo.git("work", &["log", "-1", "--format=%s", "main"]),
+            "A test for any version",
+            "nothing done"
+        );
 
         repo.git("work", &["config", "--add", "remote.public.push", "refs/heads/main:refs/heads/main"]);
         assert!(repo.release(&["0.3.0"]).unwrap_err().contains("also pushes refs/heads/main"));

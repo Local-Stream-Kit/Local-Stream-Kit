@@ -177,6 +177,11 @@ pub enum PanelRequest {
     },
     /// Opens the logs folder in Explorer, on the PC the app runs on.
     OpenLogs,
+    /// Saves a card as a file ([`CardFile`](crate::cards::CardFile)) in the
+    /// Downloads folder of the PC the app runs on, and shows it there in
+    /// Explorer (a download does nothing in an OBS dock). Answered with
+    /// `ExportFailed` if it couldn't be saved.
+    ExportCard { card: crate::cards::Card },
     /// Empties the Status page's list of recent warnings and errors.
     ClearLogLines,
     /// Downloads the newer version that's out and puts it in the exe's
@@ -259,6 +264,10 @@ pub enum PanelEvent {
     },
     /// A plugin couldn't be removed or forgotten (for the Plugins page).
     PluginProblem {
+        message: String,
+    },
+    /// A card wasn't exported, with why.
+    ExportFailed {
         message: String,
     },
     /// The config was saved, as `revision`.
